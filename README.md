@@ -47,6 +47,8 @@ O acesso usa um código de 6 dígitos enviado por e-mail pelo [Resend](https://r
 | `AUTH_CODE_MINUTES` | `10` | Validade do código |
 | `AUTH_SESSION_DAYS` | `7` | Validade da sessão |
 
+No `.env`, mantenha o remetente entre aspas, como em `AUTH_EMAIL_FROM="Intergado <login@seu-dominio.com.br>"`: sem elas, o `<` quebra a leitura do arquivo pelos scripts `dev-*.sh`.
+
 O remetente de teste `onboarding@resend.dev` só entrega para o e-mail dono da conta Resend. Para outros destinatários, verifique um domínio no Resend.
 
 A lista de e-mails é sincronizada com a tabela `users` a cada inicialização do Spring Boot; quem sai da lista perde as sessões abertas. O código expira em 10 minutos, aceita 5 tentativas e só pode ser usado uma vez; um novo código só é gerado 60 segundos após o anterior. A resposta ao pedido de código é sempre a mesma, para não revelar quais e-mails estão autorizados. Se o envio pelo Resend falhar, o erro aparece no log do Spring Boot.

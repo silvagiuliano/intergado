@@ -4,6 +4,8 @@ services:
     environment:
       DB_URL: jdbc:sqlite:/data/intergado.db
       AUTH_ALLOWED_EMAILS: ${AUTH_ALLOWED_EMAILS:-}
+      AUTH_CODE_MINUTES: ${AUTH_CODE_MINUTES:-10}
+      AUTH_SESSION_DAYS: ${AUTH_SESSION_DAYS:-7}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       AUTH_EMAIL_FROM: ${AUTH_EMAIL_FROM:-Intergado <onboarding@resend.dev>}
