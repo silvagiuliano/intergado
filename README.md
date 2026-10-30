@@ -8,6 +8,8 @@ Para entender o estado atual, as decisões e as pendências, consulte a [memóri
 
 Veja também os [diagramas de arquitetura e sequência](docs/DIAGRAMAS_ARQUITETURA_SEQUENCIA.md).
 
+Para publicar em um servidor com HTTPS, siga o [guia de deploy](docs/DEPLOY.md).
+
 ## Arquitetura
 
 | Componente | Tecnologia | Papel |
@@ -46,7 +48,7 @@ docker compose up --build -d
 
 Abra **http://localhost:3000**. `APP_LISTEN_HOST` e `WEB_PORT` em `.env` controlam o endereço e a porta publicados pelo Docker Compose. Para ver logs: `docker compose logs -f`. Para parar: `docker compose down`. O arquivo SQLite persiste no volume `sqlite_data`; `docker compose down -v` também remove os dados.
 
-Para produção, ainda são necessários HTTPS, backup e perfis de permissão; esta entrega é um ambiente inicial de demonstração.
+Para produção, ainda são necessários backup automático e perfis de permissão; esta entrega é um ambiente inicial de demonstração. O passo a passo para um servidor está em [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Login por e-mail
 
@@ -76,8 +78,11 @@ No Docker Compose, o serviço `caddy` recebe as conexões em HTTPS e as encaminh
 | Variável | Padrão | Uso |
 | --- | --- | --- |
 | `CADDY_SITE_ADDRESS` | `localhost` | Endereço atendido: `localhost`, um IP ou um domínio. Vários: `"localhost, 192.168.1.10"` (vírgula **e** espaço) |
-| `CADDY_TLS` | `auto` | `auto`: Let's Encrypt para domínio público, certificado interno para `localhost`/IP. `internal`: sempre o certificado interno (rede local, nomes não públicos) |
+| `CADDY_TLS` | `auto` | `auto`: Let's Encrypt para domínio público, certificado interno para `localhost`/IP. `internal`: sempre o certificado interno (rede local, nomes não públicos). `off`: só HTTP, para testes |
 | `CADDY_HTTP_PORT`, `CADDY_HTTPS_PORT` | `80`, `443` | Portas escutadas e publicadas. HTTP redireciona para HTTPS mantendo a porta |
+| `CADDY_LISTEN_HOST` | `0.0.0.0` | Endereço da máquina onde as portas do Caddy são publicadas; `127.0.0.1` restringe ao próprio servidor |
+
+Para testes sem certificado, use `CADDY_TLS=off`: o Caddy atende só HTTP em `http://<ip-da-máquina>:CADDY_HTTP_PORT`, para qualquer host ou IP, sem redirecionar e ignorando `CADDY_SITE_ADDRESS`. Mantenha `AUTH_COOKIE_SECURE=false` nesse modo.
 
 Com os padrões, abra **https://localhost**. Para um domínio público, aponte o DNS para o servidor, mantenha as portas 80 e 443 abertas e defina `CADDY_SITE_ADDRESS=seu.dominio.com.br`: o certificado é emitido e renovado sozinho. Os certificados ficam no volume `caddy_data`.
 
