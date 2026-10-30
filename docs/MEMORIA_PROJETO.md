@@ -30,6 +30,7 @@ O material de contexto inclui o [resumo executivo](01_Resumo_Executivo_Caso_Augu
 | Login | Código de 6 dígitos enviado por e-mail via Resend para uma lista de e-mails autorizados. Sessão em cookie `HttpOnly` validada pelo Spring Boot e pelo Quarkus em todas as rotas `/api/*`. |
 | Integrações | Tela **Integrações** (React, `#integracoes`) e API `/api/integrations` para Evolution API (WhatsApp, fase de testes) e Resend. Valores da tela ficam em `integration_settings` e têm prioridade sobre o `.env`; segredos ficam só no `.env`. |
 | WhatsApp | Evolution API 2.3.7 em `compose.evolution.yaml`. Mensagem de teste e aviso automático de mudança de status, **apenas para números de teste**. Detalhes em [EVOLUTION_API.md](EVOLUTION_API.md). |
+| HTTPS | Serviço `caddy` (2.11.7) no Compose, na frente do Nginx: certificado automático (Let's Encrypt para domínio público, CA interna para localhost/IP), HTTP → HTTPS mantendo a porta, compressão zstd/gzip. Configurado por `Caddyfile` e `CADDY_*`. |
 | Dados das planilhas | Apenas **quatro saldos históricos resumidos** entram no cadastro inicial. As linhas das planilhas não são importadas automaticamente. |
 
 Ao abrir, o frontend consulta `GET /api/auth/me`; sem sessão, mostra a tela de login (e-mail → código). Depois do login, consulta três rotas ao abrir ou atualizar a página: `GET /api/farms`, `GET /api/purchases` e `GET /api/analytics/overview`. As chamadas ocorrem em paralelo; se alguma falhar, a interface mostra “Serviços indisponíveis”. O formulário da interface cria compras, e a tabela permite mudar seu status. Qualquer `401` devolve o usuário à tela de login. O Swagger expõe também as operações de cadastro e edição que ainda não têm formulário próprio no React.
@@ -38,7 +39,8 @@ Ao abrir, o frontend consulta `GET /api/auth/me`; sem sessão, mostra a tela de 
 
 ```text
 Navegador
-  └─ Nginx (Docker, porta 3000) ou Vite (dev, porta 5173)
+  └─ Caddy (Docker, HTTPS 443 / HTTP 80 → redireciona)
+  └─ Nginx (Docker, porta 3000, também acessível direto em HTTP) ou Vite (dev, porta 5173)
        ├─ /api/auth, /api/integrations, /api/farms, /api/purchases → Spring Boot :8080 → SQLite
        │                                    └─ Evolution API :8090 (compose.evolution.yaml) → WhatsApp
        ├─ /api/analytics          → Quarkus :8081     → SQLite
@@ -60,6 +62,7 @@ Navegador
 | [`services/purchases-api/src/main/java/br/com/intergado/purchases/IntegrationSettings.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/IntegrationSettings.java) | Definição dos campos de cada integração, validação e leitura tela > `.env` > padrão. |
 | [`services/purchases-api/src/main/java/br/com/intergado/purchases/IntegrationController.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/IntegrationController.java) | Rotas `/api/integrations` e ações do Evolution (estado, conectar, desconectar, teste). |
 | [`services/purchases-api/src/main/java/br/com/intergado/purchases/EvolutionClient.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/EvolutionClient.java), [`WhatsAppNotifier.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/WhatsAppNotifier.java) | Chamadas HTTP ao Evolution e envio aos números de teste (em segundo plano na mudança de status). |
+| [`Caddyfile`](../Caddyfile) | Caddy: endereço, modo de TLS e portas vindos do `.env`; redirecionamento explícito de HTTP para manter portas não padrão. |
 | [`compose.evolution.yaml`](../compose.evolution.yaml) | Evolution API, PostgreSQL e Redis próprios, apenas para testes. |
 | [`services/analytics-api/src/main/java/br/com/intergado/analytics/AuthFilter.java`](../services/analytics-api/src/main/java/br/com/intergado/analytics/AuthFilter.java) | Valida no Quarkus o mesmo cookie de sessão, consultando o SQLite. |
 | [`services/analytics-api/src/main/java/br/com/intergado/analytics/AnalyticsResource.java`](../services/analytics-api/src/main/java/br/com/intergado/analytics/AnalyticsResource.java) | Agregações de compras para o dashboard. |
@@ -179,6 +182,7 @@ Abra `http://localhost:5173` ou `http://IP_DA_MAQUINA:5173`. Os scripts Java lee
 | `AUTH_EMAIL_FROM` | `Intergado <onboarding@resend.dev>` | Remetente. O endereço de teste do Resend só entrega ao dono da conta. |
 | `AUTH_COOKIE_SECURE` | `false` | `true` em HTTPS. |
 | `AUTH_CODE_MINUTES`, `AUTH_SESSION_DAYS` | `10`, `7` | Validade do código e da sessão. |
+| `CADDY_SITE_ADDRESS`, `CADDY_TLS`, `CADDY_HTTP_PORT`, `CADDY_HTTPS_PORT` | `localhost`, `auto`, `80`, `443` | Endereço, modo de certificado e portas do Caddy. |
 | `EVOLUTION_*`, `WHATSAPP_*` | ver [EVOLUTION_API.md](EVOLUTION_API.md#variáveis) | Evolution API e WhatsApp; parte delas também editável na tela Integrações. |
 
 ### Docker Compose
@@ -202,6 +206,8 @@ Abra `http://localhost:3000`, salvo ajuste em `WEB_PORT`. O volume `sqlite_data`
 | Painel volta para o login ou APIs respondem `401` | Sessão ausente, vencida ou e-mail removido de `AUTH_ALLOWED_EMAILS`. Entrar de novo. |
 | Código não chega | Procurar `Falha ao enviar` no log do Spring Boot; conferir `RESEND_API_KEY` e domínio verificado do remetente. Sem chave, o código está no log (`Código de acesso para`). Novo código só após 60 s. |
 | WhatsApp: “não conectado” ou “Evolution API não respondeu” | Parear em Integrações → Conectar; conferir se `compose.evolution.yaml` está ativo e se `EVOLUTION_API_KEY` é a mesma nos dois lados. Ver [EVOLUTION_API.md](EVOLUTION_API.md#comportamento-e-diagnóstico). |
+| Caddy não sobe: `port is already allocated` | As portas 80/443 estão em uso (nesta máquina, pelo Caddy de outro projeto, `jev-caddy-1`). Ajustar `CADDY_HTTP_PORT`/`CADDY_HTTPS_PORT`; o `.env` local usa 8088/8443. Let's Encrypt exige 80/443 livres. |
+| Aviso de certificado no navegador | Certificado interno do Caddy (localhost, IP ou `CADDY_TLS=internal`). Exportar e confiar em `/data/caddy/pki/authorities/local/root.crt` do contêiner `caddy`. |
 | Contagens diferentes de 7 compras e 4 fazendas | O banco persiste entre reinicializações. As inserções iniciais usam `INSERT OR IGNORE`; registros já existentes são preservados. |
 
 As verificações feitas durante a implementação incluíram build das duas APIs e do frontend, respostas `200` para OpenAPI/Swagger via proxy, cadastro e edição de fazenda e compra em **SQLite temporário**, retorno `409` para nome duplicado e atualização do nome da fazenda nas compras associadas. Isso não substitui uma execução de ponta a ponta no ambiente atual; não há indicação de que os serviços estejam ativos neste momento.
@@ -216,7 +222,7 @@ O login foi verificado em 30/10/2026 com os JARs compilados e um SQLite temporá
 2. **Modelo canônico:** relacionar compras à fazenda por identificador, cadastrar pastos/produtos/unidades e definir regras de mudança de nome. O vínculo atual usa texto.
 3. **Dashboards rurais reais:** histórico de movimentos, manejo, ração e insumos só devem ser publicados após as regras de negócio e qualidade de dados acima.
 4. **Interface de administração:** o React cadastra compras e altera status; cadastro/edição de fazendas e edição completa de compras são feitos pelo Swagger/API.
-5. **Operação para múltiplos usuários:** o login por e-mail existe, mas todos os usuários autorizados têm o mesmo acesso. Faltam perfis/permissões, cadastro de usuários pela interface, limite de pedidos por IP, HTTPS, backup, migrações de schema e testes de integração; avaliar PostgreSQL quando a demonstração evoluir para uso compartilhado.
+5. **Operação para múltiplos usuários:** o login por e-mail e o HTTPS (Caddy) existem, mas todos os usuários autorizados têm o mesmo acesso. Faltam perfis/permissões, cadastro de usuários pela interface, limite de pedidos por IP, backup, migrações de schema e testes de integração; avaliar PostgreSQL quando a demonstração evoluir para uso compartilhado.
 6. **Integrações propostas:** o WhatsApp tem só a Fase 1 (envio de teste via Evolution API). Recebimento de mensagens, IA, OpenSearch, fornecedores e Realtec constam da documentação de oportunidades, mas não estão implementados.
 7. **Tela Integrações:** qualquer usuário logado pode alterá-la; falta perfil de administrador e histórico de alterações (só o último `updated_by` fica gravado).
 
@@ -233,5 +239,6 @@ As dúvidas de negócio que bloqueiam indicadores mais fortes estão listadas no
 7. Registrar arquitetura e sequência em Mermaid e SVG.
 8. Adicionar login sem senha: código de 6 dígitos enviado via Resend, lista de e-mails autorizados por variável de ambiente e todas as rotas `/api/*` protegidas nas duas APIs (sem Spring Security; filtro próprio e sessão no SQLite).
 9. Fase 1 do WhatsApp: Evolution API 2.3.7 em Compose separado, tela **Integrações** para cadastrar dados dos integradores (valor da tela > `.env` > padrão, segredos só no `.env`), mensagens apenas para números de teste.
+10. Adicionar Caddy na frente do Nginx para HTTPS, com endereço, modo de certificado e portas no `.env`; o Nginx e as rotas não mudaram.
 
 Este arquivo é um retrato do projeto, não uma fonte alternativa de dados operacionais. Ao alterar APIs, modelo, configuração ou importação, atualize também esta memória, o [README](../README.md), o [roteiro](ROTEIRO_AVALIACAO_APP.md) e os diagramas afetados.

@@ -16,6 +16,7 @@ Veja também os [diagramas de arquitetura e sequência](docs/DIAGRAMAS_ARQUITETU
 | `purchases-api` | Java 17 + Spring Boot 4 + Maven | API de fazendas e solicitações; inicialização do SQLite; Swagger de cadastros |
 | `analytics-api` | Java 17 + Quarkus 3 + Maven | Indicadores agregados e Swagger de consultas |
 | `sqlite_data` | Arquivo SQLite em volume Docker | Persistência compartilhada entre os serviços |
+| `caddy` | Caddy 2.11 | HTTPS na frente do Nginx, com certificado automático e redirecionamento de HTTP |
 
 O Nginx encaminha `/api/auth`, `/api/integrations`, `/api/farms` e `/api/purchases` ao Spring Boot e `/api/analytics` ao Quarkus. Os serviços Java usam o mesmo arquivo; o Spring Boot cria as tabelas e os dados de demonstração antes de o Quarkus iniciar. Não é necessário instalar ou executar um servidor de banco de dados. Os dados iniciais são **apenas exemplos**, identificados no banco e no painel.
 
@@ -67,6 +68,22 @@ O remetente de teste `onboarding@resend.dev` só entrega para o e-mail dono da c
 A lista de e-mails é sincronizada com a tabela `users` a cada inicialização do Spring Boot; quem sai da lista perde as sessões abertas. O código expira em 10 minutos, aceita 5 tentativas e só pode ser usado uma vez; um novo código só é gerado 60 segundos após o anterior. A resposta ao pedido de código é sempre a mesma, para não revelar quais e-mails estão autorizados. Se o envio pelo Resend falhar, o erro aparece no log do Spring Boot.
 
 A sessão é um cookie `HttpOnly` (`intergado_session`, `SameSite=Lax`) guardado como hash na tabela `sessions`. O Spring Boot e o Quarkus validam esse cookie em todas as rotas `/api/*`, exceto `request-code`, `verify` e `logout`. O Swagger continua abrindo, mas as chamadas só funcionam depois do login no mesmo navegador.
+
+## HTTPS com Caddy
+
+No Docker Compose, o serviço `caddy` recebe as conexões em HTTPS e as encaminha ao Nginx (`web`). A configuração fica no [`Caddyfile`](Caddyfile) e nestas variáveis do `.env`:
+
+| Variável | Padrão | Uso |
+| --- | --- | --- |
+| `CADDY_SITE_ADDRESS` | `localhost` | Endereço atendido: `localhost`, um IP ou um domínio. Vários: `"localhost, 192.168.1.10"` (vírgula **e** espaço) |
+| `CADDY_TLS` | `auto` | `auto`: Let's Encrypt para domínio público, certificado interno para `localhost`/IP. `internal`: sempre o certificado interno (rede local, nomes não públicos) |
+| `CADDY_HTTP_PORT`, `CADDY_HTTPS_PORT` | `80`, `443` | Portas escutadas e publicadas. HTTP redireciona para HTTPS mantendo a porta |
+
+Com os padrões, abra **https://localhost**. Para um domínio público, aponte o DNS para o servidor, mantenha as portas 80 e 443 abertas e defina `CADDY_SITE_ADDRESS=seu.dominio.com.br`: o certificado é emitido e renovado sozinho. Os certificados ficam no volume `caddy_data`.
+
+Com o certificado interno, o navegador avisa até que a CA local do Caddy seja confiável. Para exportá-la: `docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt` e importe o arquivo no navegador ou no sistema.
+
+Quando todo o acesso passar pelo Caddy, use `AUTH_COOKIE_SECURE=true` para o cookie de sessão só trafegar em HTTPS. Com `true`, o login deixa de funcionar pelo HTTP direto (`WEB_PORT`) e pelos scripts de desenvolvimento, que usam o mesmo `.env`. A porta `WEB_PORT` continua publicada para acesso direto ao Nginx em HTTP.
 
 ## Desenvolvimento local
 

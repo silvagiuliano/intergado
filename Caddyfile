@@ -1,0 +1,30 @@
+# Caddy na frente do Nginx (serviço web): HTTPS automático e redirecionamento de HTTP.
+# Configuração pelo .env:
+#   CADDY_SITE_ADDRESS  localhost, um IP ou um domínio; vários separados por ", " (vírgula e espaço)
+#   CADDY_TLS           auto: Let's Encrypt para domínio público, certificado interno para localhost/IP
+#                       internal: sempre o certificado interno do Caddy (rede local, nomes não públicos)
+#   CADDY_HTTP_PORT / CADDY_HTTPS_PORT  portas escutadas e publicadas (as mesmas, para os redirecionamentos)
+{
+	http_port {$CADDY_HTTP_PORT:80}
+	https_port {$CADDY_HTTPS_PORT:443}
+	# The automatic redirect drops the port when it equals https_port, which breaks
+	# non-standard ports such as 8443; the http:// block below keeps it.
+	auto_https disable_redirects
+}
+
+http:// {
+	redir https://{host}:{$CADDY_HTTPS_PORT:443}{uri} permanent
+}
+
+(tls-auto) {
+}
+
+(tls-internal) {
+	tls internal
+}
+
+{$CADDY_SITE_ADDRESS:localhost} {
+	import tls-{$CADDY_TLS:auto}
+	encode zstd gzip
+	reverse_proxy web:80
+}

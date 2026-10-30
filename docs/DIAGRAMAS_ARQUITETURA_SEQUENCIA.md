@@ -1,6 +1,6 @@
 # Diagramas da aplicação Intergado
 
-Os diagramas abaixo representam a implementação atual com Docker Compose, SQLite e login por código enviado por e-mail. Em desenvolvimento local, o Vite serve o React na porta `APP_DEV_PORT` e encaminha as mesmas rotas para as APIs.
+Os diagramas abaixo representam a implementação atual com Docker Compose, Caddy (HTTPS), SQLite e login por código enviado por e-mail. No diagrama de sequência, “Nginx ou Vite” inclui o Caddy à frente quando o acesso é por HTTPS. Em desenvolvimento local, o Vite serve o React na porta `APP_DEV_PORT` e encaminha as mesmas rotas para as APIs.
 
 Versões para abrir ou compartilhar: [arquitetura em SVG](ARQUITETURA_APP.svg) e [sequência em SVG](SEQUENCIA_APP.svg).
 
@@ -8,10 +8,13 @@ Versões para abrir ou compartilhar: [arquitetura em SVG](ARQUITETURA_APP.svg) e
 
 ```mermaid
 flowchart LR
-    U["Usuário<br/>navegador"] -->|HTTP: 3000 no Docker| W
+    U["Usuário<br/>navegador"] -->|"HTTPS: 443 (CADDY_HTTPS_PORT)"| CAD
+    U -.->|"HTTP direto: 3000"| W
 
     subgraph Compose["Docker Compose"]
+        CAD["Caddy<br/>certificado e HTTPS"]
         W["Web<br/>Nginx + React"]
+        CAD -->|"HTTP interno"| W
         P["API de cadastros<br/>Spring Boot / Java<br/>porta 8080"]
         A["API de indicadores<br/>Quarkus / Java<br/>porta 8081"]
         DB[("SQLite<br/>volume sqlite_data")]
@@ -42,7 +45,7 @@ As APIs compartilham o mesmo arquivo SQLite. O Spring Boot cria as tabelas e os 
 
 O Evolution API roda em um Compose à parte, só para testes. Quando os dois arquivos sobem juntos, o Spring Boot o alcança por `http://evolution-api:8080`; nos scripts de desenvolvimento, por `EVOLUTION_API_URL`. Os dados editáveis das integrações vêm da tela **Integrações** (`integration_settings`) e, na falta deles, do `.env`. Detalhes em [EVOLUTION_API.md](EVOLUTION_API.md). Os quatro saldos de fazendas cadastrados inicialmente são históricos, de 2021. As planilhas XLSX **não são importadas automaticamente** a cada execução.
 
-## Sequência: login, abrir o painel e criar uma solicitação
+## Sequência: login, painel, solicitação e WhatsApp
 
 ```mermaid
 sequenceDiagram
@@ -54,6 +57,8 @@ sequenceDiagram
     participant Quarkus as Quarkus
     participant SQLite as SQLite
     participant Resend as Resend
+    participant Evolution as Evolution API
+    participant WhatsApp as WhatsApp
 
     Usuario->>React: Abre o dashboard
     React->>Web: GET /
@@ -117,6 +122,48 @@ sequenceDiagram
     React->>Web: Recarrega as três consultas do painel
     Web-->>React: Dados atualizados das APIs
     React-->>Usuario: Exibe a nova solicitação e os indicadores
+
+    rect rgb(236, 248, 238)
+    Note over Usuario,WhatsApp: WhatsApp (testes): configuração e pareamento na tela Integrações
+    Usuario->>React: Abre Integrações e salva números e opções
+    React->>Web: PUT /api/integrations/evolution
+    Web->>Spring: Encaminha PUT
+    Spring->>SQLite: Grava integration_settings (tela tem prioridade sobre o .env)
+    Spring-->>React: Valores e origem de cada campo
+    Usuario->>React: Conectar / gerar código
+    React->>Web: POST /api/integrations/evolution/connect
+    Web->>Spring: Encaminha POST
+    Spring->>Evolution: GET /instance/connectionState/{instância}
+    alt Instância ainda não existe
+        Spring->>Evolution: POST /instance/create
+    else Instância existe e está desconectada
+        Spring->>Evolution: GET /instance/connect/{instância}
+    end
+    Evolution-->>Spring: QR Code e código de pareamento
+    Spring-->>React: QR Code e código
+    Usuario->>WhatsApp: Escaneia o QR Code com o celular que envia
+    WhatsApp-->>Evolution: Sessão conectada (estado open)
+    end
+
+    Usuario->>React: Muda o status de uma solicitação
+    React->>Web: PUT /api/purchases/{id}/status
+    Web->>Spring: Encaminha PUT
+    Spring->>SQLite: UPDATE purchase_requests
+    Spring-->>React: 200 + JSON, sem esperar o WhatsApp
+    opt Avisos ligados e novo status na lista escolhida
+        Spring->>Spring: Envio em segundo plano
+        Spring->>Evolution: GET /instance/connectionState/{instância}
+        alt Estado open
+            loop Cada número de teste
+                Spring->>Evolution: POST /message/sendText/{instância}
+                Evolution->>WhatsApp: Mensagem com solicitação, status e valor
+            end
+        else Não conectado ou Evolution indisponível
+            Spring->>Spring: Registra aviso no log e não envia
+        end
+    end
 ```
+
+O bloco do WhatsApp só acontece com o `compose.evolution.yaml` ativo. As mensagens vão apenas para os números de teste; a mesma verificação de conexão vale para o botão **Enviar mensagem de teste** (`POST /api/integrations/evolution/test`). Veja [EVOLUTION_API.md](EVOLUTION_API.md).
 
 Sem sessão válida, qualquer rota `/api/*` responde `401` e o React volta para a tela de login; o botão **Sair** chama `POST /api/auth/logout`. O formulário usa `POST /api/purchases`; a mudança de status usa `PUT /api/purchases/{id}/status`. O Swagger de cadastros permite também `POST` e `PUT /api/farms` e `PUT /api/purchases/{id}`. Consulte os endpoints no [README](../README.md#endpoints).

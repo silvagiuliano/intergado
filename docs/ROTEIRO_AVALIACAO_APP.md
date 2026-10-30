@@ -15,7 +15,7 @@ docker compose ps
 
 O resultado esperado de `docker compose ps` é `purchases-api` e `analytics-api` como **healthy**, e `web` como **Up**. A primeira execução pode demorar porque baixa imagens e dependências. O SQLite é um arquivo compartilhado pelos serviços; não há contêiner nem porta de banco de dados.
 
-Abra **http://localhost:3000** no navegador da máquina que executa o Docker. Se o projeto roda em um servidor remoto, encaminhe a porta 3000 por SSH ou acesse o endereço desse servidor conforme sua rede permitir.
+Abra **https://localhost** (Caddy, com as portas `CADDY_HTTPS_PORT` do `.env`) ou **http://localhost:3000** (Nginx direto) no navegador da máquina que executa o Docker. Com o certificado interno do Caddy, o navegador mostra um aviso até a CA local ser confiável; veja [HTTPS com Caddy](../README.md#https-com-caddy). Se o projeto roda em um servidor remoto, encaminhe a porta 3000 por SSH ou acesse o endereço desse servidor conforme sua rede permitir.
 
 Para executar os três serviços diretamente em **modo de desenvolvimento**, siga os comandos do [README](../README.md#desenvolvimento-local). Os endereços de escuta e portas ficam no `.env` da raiz; com os valores padrão, a interface fica em `http://IP_DA_MAQUINA:5173`.
 
