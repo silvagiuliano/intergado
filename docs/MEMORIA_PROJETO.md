@@ -1,0 +1,192 @@
+# Memória do projeto Intergado
+
+**Atualizada em:** 30/10/2026
+
+**Natureza:** registro do estado observado no repositório e das decisões tomadas durante a construção da demonstração.
+**Ponto de entrada:** [README](../README.md) e [roteiro de avaliação](ROTEIRO_AVALIACAO_APP.md).
+
+## 1. Objetivo e contexto
+
+O projeto começou como uma aplicação web para apresentar dashboards rurais a partir de documentos das fazendas. O usuário pediu Java, React, Spring Boot, Maven, Quarkus e PostgreSQL. Para facilitar a demonstração sem instalar um servidor de banco de dados, a implementação atual usa **SQLite**. PostgreSQL permanece uma possibilidade para uma implantação futura; não há configuração PostgreSQL funcional neste repositório.
+
+O escopo entregue até agora combina dois assuntos:
+
+1. **Compras rurais:** cadastro de solicitações, mudança de status e indicadores agregados.
+2. **Fazendas:** quatro registros iniciais com o último saldo datado do controle de gado, extraídos das planilhas e exibidos separadamente no dashboard.
+
+Os documentos de origem e de análise estão em [`docs/`](.). A avaliação detalhada das planilhas está em [AVALIACAO_PLANILHAS_DASHBOARDS.md](AVALIACAO_PLANILHAS_DASHBOARDS.md). A arquitetura e o fluxo de uso estão em [DIAGRAMAS_ARQUITETURA_SEQUENCIA.md](DIAGRAMAS_ARQUITETURA_SEQUENCIA.md), também disponíveis como [SVG de arquitetura](ARQUITETURA_APP.svg) e [SVG de sequência](SEQUENCIA_APP.svg).
+
+O material de contexto inclui o [resumo executivo](01_Resumo_Executivo_Caso_Augusto.pdf), os [fluxos revisados](02_Fluxos_Revisados_01_a_08.pdf), o [diagnóstico preliminar](03_Diagnostico_Preliminar_Processos_POPs.pdf), as transcrições de [13/05/2026](04_Transcricao_Reuniao_13-05-2026.pdf) e [19/06/2026](05_Transcricao_Reuniao_19-06-2026.pdf), além das [oportunidades de melhoria](OPORTUNIDADES_MELHORIAS.md). Esses arquivos são contexto de negócio; esta memória descreve sobretudo o software presente no repositório.
+
+## 2. O que está implementado
+
+| Área | Estado atual |
+| --- | --- |
+| Interface | React 19 com Vite em desenvolvimento; Nginx serve o build no Docker. Mostra fazendas, quatro indicadores de compras, atividade de sete dias, categorias e solicitações recentes. |
+| API de escrita | Spring Boot 4.1.2, Java 17 e Maven. Cadastra e edita fazendas e compras; altera o status de compras. |
+| API de leitura analítica | Quarkus 3.40.1.1, Java 17 e Maven Wrapper. Calcula indicadores a partir das compras. |
+| Persistência | Arquivo SQLite compartilhado pelas duas APIs. O Spring Boot cria tabelas e insere exemplos ausentes na inicialização. |
+| Documentação de API | Swagger/OpenAPI separado para Spring Boot e Quarkus. |
+| Dados das planilhas | Apenas **quatro saldos históricos resumidos** entram no cadastro inicial. As linhas das planilhas não são importadas automaticamente. |
+
+O frontend consulta três rotas ao abrir ou atualizar a página: `GET /api/farms`, `GET /api/purchases` e `GET /api/analytics/overview`. As chamadas ocorrem em paralelo; se alguma falhar, a interface mostra “Serviços indisponíveis”. O formulário da interface cria compras, e a tabela permite mudar seu status. O Swagger expõe também as operações de cadastro e edição que ainda não têm formulário próprio no React.
+
+## 3. Arquitetura e arquivos principais
+
+```text
+Navegador
+  └─ Nginx (Docker, porta 3000) ou Vite (dev, porta 5173)
+       ├─ /api/farms, /api/purchases → Spring Boot :8080 → SQLite
+       ├─ /api/analytics          → Quarkus :8081     → SQLite
+       ├─ /swagger-ui, /v3/api-docs → Swagger Spring Boot
+       └─ /q/swagger-ui, /q/openapi → Swagger Quarkus
+```
+
+| Caminho | Responsabilidade |
+| --- | --- |
+| [`web/src/main.jsx`](../web/src/main.jsx) | Estado e telas do dashboard, filtros, formulário de compra e chamadas HTTP. |
+| [`web/src/style.css`](../web/src/style.css) | Estilos responsivos da interface. |
+| [`web/vite.config.js`](../web/vite.config.js) | Endereço de escuta local e proxy das APIs/Swagger no desenvolvimento. |
+| [`web/nginx.conf`](../web/nginx.conf) | Encaminhamento de rotas no contêiner web. |
+| [`services/purchases-api/src/main/java/br/com/intergado/purchases/FarmController.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/FarmController.java) | CRUD parcial de fazendas: criar, listar, consultar e editar. |
+| [`services/purchases-api/src/main/java/br/com/intergado/purchases/PurchaseController.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/PurchaseController.java) | Cadastro, consulta, edição e mudança de status de compras. |
+| [`services/analytics-api/src/main/java/br/com/intergado/analytics/AnalyticsResource.java`](../services/analytics-api/src/main/java/br/com/intergado/analytics/AnalyticsResource.java) | Agregações de compras para o dashboard. |
+| [`services/purchases-api/src/main/resources/schema.sql`](../services/purchases-api/src/main/resources/schema.sql) | Tabelas, restrições e índices SQLite. |
+| [`services/purchases-api/src/main/resources/data.sql`](../services/purchases-api/src/main/resources/data.sql) | Quatro fazendas e sete compras de exemplo, inseridas com `INSERT OR IGNORE`. |
+| [`compose.yaml`](../compose.yaml) | Três serviços e volume persistente `sqlite_data`. |
+| [`dev-purchases.sh`](../dev-purchases.sh), [`dev-quarkus.sh`](../dev-quarkus.sh) | Inicialização local das APIs com variáveis da raiz. |
+
+No Compose, o Spring Boot deve ficar saudável antes da inicialização do Quarkus, e ambos devem ficar saudáveis antes do serviço web. Somente o serviço web publica uma porta no host. As APIs e o Swagger são acessados por meio do proxy web.
+
+## 4. Modelo de dados atual
+
+### `farms`
+
+Campos: `id`, `name` único, `balance_date`, `herd_balance`, `adepara_balance`, `sources` e `demo`. A API aceita `name`, `balanceDate`, `herdBalance`, `adeparaBalance` e `sources`. Os saldos não podem ser negativos. O nome não pode se repetir. Ao renomear uma fazenda pela API, os registros de compra cujo campo `farm` corresponde exatamente ao nome anterior são atualizados.
+
+Os quatro registros iniciais são:
+
+| Fazenda | Data do último lançamento datado | Saldo da planilha | Saldo Adepará |
+| --- | --- | ---: | ---: |
+| Santa Cruz | 25/02/2021 | 2.881 | 2.676 |
+| Ilha Verde | 15/02/2021 | 3.985 | 3.337 |
+| Novo Mundo | 10/03/2021 | 2.271 | 2.617 |
+| Campo Verde | 17/03/2021 | 923 | 895 |
+
+Esses valores são **históricos e têm datas diferentes**. Não representam o tamanho atual dos rebanhos. A relação entre saldo interno e saldo Adepará ainda precisa de interpretação e conciliação operacional. O campo `sources` é texto separado por vírgulas; não existe tabela de fontes ou proveniência por linha.
+
+### `purchase_requests`
+
+Campos: `id`, `title`, `farm`, `category`, `requester`, `supplier`, `amount`, `status`, `requested_at`, `updated_at` e `demo`. `farm` ainda é texto, sem chave estrangeira para `farms`; a API de compras não valida se a fazenda informada já foi cadastrada. A listagem retorna no máximo 100 solicitações recentes e permite filtrar por status. Os sete registros iniciais são **ilustrativos**, não foram importados das planilhas. Bases antigas podem conservar compras com a fazenda fictícia “Boa Vista”; a inicialização não altera esses dados.
+
+Os status disponíveis são `RECEIVED`, `QUOTING`, `AWAITING_APPROVAL`, `APPROVED`, `ORDERED`, `DELIVERED` e `PAID`. A API analítica conta como “em andamento” todos os registros fora de `DELIVERED` e `PAID`. Ela calcula total, aguardando aprovação, concluídos, valor estimado, valor pago, grupos por status/categoria/fazenda e contagem diária dos últimos sete dias. Os indicadores são de **compras**, não de produtividade ou estoque do gado.
+
+## 5. APIs e Swagger
+
+| Método | Rota | Serviço | Finalidade |
+| --- | --- | --- | --- |
+| `GET` | `/api/farms` | Spring Boot | Listar fazendas. |
+| `GET` | `/api/farms/{id}` | Spring Boot | Consultar fazenda. |
+| `POST` | `/api/farms` | Spring Boot | Cadastrar fazenda e saldos. |
+| `PUT` | `/api/farms/{id}` | Spring Boot | Editar todos os campos de entrada. |
+| `GET` | `/api/purchases` | Spring Boot | Listar até 100 compras; filtro opcional `status`. |
+| `GET` | `/api/purchases/{id}` | Spring Boot | Consultar compra. |
+| `POST` | `/api/purchases` | Spring Boot | Criar compra com status `RECEIVED`. |
+| `PUT` | `/api/purchases/{id}` | Spring Boot | Editar título, fazenda, categoria, solicitante, fornecedor e valor. |
+| `PUT` | `/api/purchases/{id}/status` | Spring Boot | Alterar status. |
+| `GET` | `/api/analytics/overview` | Quarkus | Consultar indicadores agregados. |
+
+Com as portas padrão, o Swagger de cadastros e compras fica em `http://localhost:5173/swagger-ui/index.html` no desenvolvimento ou `http://localhost:3000/swagger-ui/index.html` no Docker. O Swagger de indicadores fica nos mesmos hosts em `/q/swagger-ui`. Os contratos OpenAPI estão em `/v3/api-docs` e `/q/openapi`, respectivamente. As APIs Java também expõem `/actuator/health` e `/q/health/ready` em suas portas internas.
+
+## 6. Planilhas e decisões sobre os dados
+
+Os quatro arquivos estão em [`docs/planilhas/`](planilhas/). A análise completa, com referências a abas e células, está em [AVALIACAO_PLANILHAS_DASHBOARDS.md](AVALIACAO_PLANILHAS_DASHBOARDS.md).
+
+| Arquivo | Fazendas | Possível uso após tratamento |
+| --- | --- | --- |
+| `01_Controle_gado.xlsx` | Santa Cruz, Ilha Verde, Novo Mundo, Campo Verde | Histórico de movimentações e saldos por fazenda. |
+| `01_Fichas_rotacionado_SC_M_JUL_2026.xlsx` | Santa Cruz | Manejo dos módulos e pastos, com separação entre ocorrido e planejado. |
+| `01_Rendimento_bois_da_ração.xlsx` | Ilha Verde, Novo Mundo, Santa Cruz | Lotes e ganho de peso, após padronizar fórmulas e conciliar saídas. |
+| `01_Aplicação_PT_SANTA_CRUZ_2024-25.xlsx` | Santa Cruz | Planejamento de área e quantidades de produtos, sem comprovação de aplicação realizada. |
+
+Pontos de qualidade que precisam acompanhar qualquer importação futura:
+
+- Há movimentações sem data e datas fora de ordem no controle de gado. Não atribuir datas automaticamente.
+- A coluna `COMPRA` também contém registros descritos como nascimento ou desmama; a classificação exige leitura da descrição.
+- As fichas de manejo misturam observações, fórmulas e projeções. Alguns caches de fórmulas estão desatualizados e há erros `#REF!` na aba `PARADO`.
+- Um lote de ração pode ter mais de uma saída. As fórmulas de ganho diário não têm a mesma base em todas as abas.
+- A planilha de aplicação fornece quantidades **planejadas**; faltam datas de execução, unidades confirmadas, preços e compras realizadas.
+
+O modelo recomendado na avaliação inclui cadastro canônico de fazenda, pasto e módulo, movimentação de rebanho, ciclo de pastejo, lote e saída de ração, plano de tratamento e lote de importação com linha de origem. Nada disso além da tabela simples `farms` foi implementado ainda.
+
+## 7. Execução e configuração
+
+### Desenvolvimento local
+
+Requisitos: Java 17, Maven para o Spring Boot, Node/npm para o React e acesso às dependências na primeira execução. O Quarkus usa o Maven Wrapper incluído em `services/analytics-api` (Maven 3.9.16). A partir da raiz, abra três terminais:
+
+```bash
+./dev-purchases.sh
+./dev-quarkus.sh
+cd web && npm install && npm run dev
+```
+
+Abra `http://localhost:5173` ou `http://IP_DA_MAQUINA:5173`. Os scripts Java leem [`.env.example`](../.env.example) depois que ele for copiado para `.env`; o Vite lê o `.env` da raiz diretamente. O SQLite local é `data/intergado.db`. O diretório `data/` e o arquivo `.env` são locais e não devem ser substituídos sem considerar os dados e ajustes do usuário.
+
+| Variável | Valor padrão | Efeito |
+| --- | --- | --- |
+| `APP_LISTEN_HOST` | `0.0.0.0` | Endereço de escuta do Vite e bind publicado do Compose. |
+| `APP_DEV_PORT` | `5173` | Porta do Vite. |
+| `API_LISTEN_HOST` | `0.0.0.0` | Endereço de escuta das APIs Java no perfil de desenvolvimento. |
+| `PURCHASES_API_PORT` | `8080` | Porta do Spring Boot em desenvolvimento e alvo do proxy Vite. |
+| `ANALYTICS_API_PORT` | `8081` | Porta do Quarkus em desenvolvimento e alvo do proxy Vite. |
+| `WEB_PORT` | `3000` | Porta publicada pelo Compose para o site. |
+| `PURCHASES_API_URL` | derivada do host/porta | Alvo opcional do proxy Vite para Spring Boot. |
+| `ANALYTICS_API_URL` | derivada do host/porta | Alvo opcional do proxy Vite para Quarkus. |
+
+### Docker Compose
+
+```bash
+cp .env.example .env
+docker compose up --build -d
+docker compose ps
+```
+
+Abra `http://localhost:3000`, salvo ajuste em `WEB_PORT`. O volume `sqlite_data` guarda o arquivo SQLite. `docker compose down` preserva o volume; `docker compose down -v` o remove e **apaga os dados da demonstração**. Os serviços Java no Compose mantêm portas internas 8080/8081; as variáveis `API_LISTEN_HOST` e `*_API_PORT` documentadas acima controlam o fluxo de desenvolvimento local.
+
+## 8. Diagnóstico conhecido
+
+| Sintoma | Causa já observada / verificação |
+| --- | --- |
+| `Detected Maven Version (3.8.7) is not supported` no Quarkus | Usar `./dev-quarkus.sh` ou `services/analytics-api/./mvnw quarkus:dev`, que usam Maven 3.9.16. |
+| `No plugin found for prefix 'quarckus'` | Erro de digitação: o prefixo correto é `quarkus`. |
+| `BindException: Endereço já em uso` na porta 8080 | Já há outro processo escutando na porta. Conferir com `ss -ltnp` e encerrar a instância duplicada ou mudar `PURCHASES_API_PORT` em `.env`. O mesmo princípio vale para 8081 e 5173. |
+| Dashboard mostra “Serviços indisponíveis” | O React precisa das três respostas. Verificar Spring Boot, Quarkus, proxy e `GET /api/farms`, `/api/purchases`, `/api/analytics/overview`. |
+| Contagens diferentes de 7 compras e 4 fazendas | O banco persiste entre reinicializações. As inserções iniciais usam `INSERT OR IGNORE`; registros já existentes são preservados. |
+
+As verificações feitas durante a implementação incluíram build das duas APIs e do frontend, respostas `200` para OpenAPI/Swagger via proxy, cadastro e edição de fazenda e compra em **SQLite temporário**, retorno `409` para nome duplicado e atualização do nome da fazenda nas compras associadas. Isso não substitui uma execução de ponta a ponta no ambiente atual; não há indicação de que os serviços estejam ativos neste momento.
+
+**Estado do controle de versão em 30/10/2026:** o histórico Git contém apenas os commits iniciais de documentação; boa parte da aplicação e da documentação gerada aparece como arquivo ainda não rastreado, e `README.md`/`.gitignore` têm alterações locais. Esta memória foi criada como arquivo novo e não foi registrada em commit. Antes de compartilhar ou implantar a aplicação a partir de um clone, revisar `git status` e versionar os arquivos pretendidos. O `.env` e o banco `data/intergado.db` são dados locais e não devem ser incluídos por engano.
+
+## 9. Limitações e próximos passos
+
+1. **Importação auditável das planilhas:** criar entidades por linha, preservar arquivo/aba/célula, registrar erros, tratar datas Excel, distinguir planejado de realizado e impedir duplicação na reimportação.
+2. **Modelo canônico:** relacionar compras à fazenda por identificador, cadastrar pastos/produtos/unidades e definir regras de mudança de nome. O vínculo atual usa texto.
+3. **Dashboards rurais reais:** histórico de movimentos, manejo, ração e insumos só devem ser publicados após as regras de negócio e qualidade de dados acima.
+4. **Interface de administração:** o React cadastra compras e altera status; cadastro/edição de fazendas e edição completa de compras são feitos pelo Swagger/API.
+5. **Operação para múltiplos usuários:** adicionar autenticação, autorização, HTTPS, backup, migrações de schema e testes de integração; avaliar PostgreSQL quando a demonstração evoluir para uso compartilhado.
+6. **Integrações propostas:** WhatsApp, IA, OpenSearch, fornecedores e Realtec constam da documentação de oportunidades, mas não estão implementados.
+
+As dúvidas de negócio que bloqueiam indicadores mais fortes estão listadas no fim de [AVALIACAO_PLANILHAS_DASHBOARDS.md](AVALIACAO_PLANILHAS_DASHBOARDS.md): confirmação de eventos realizados, definição do rendimento da ração, significado das diferenças de saldos, unidades dos produtos e identificadores oficiais de pastos/módulos.
+
+## 10. Histórico resumido de decisões
+
+1. Criar uma demonstração web com React, Spring Boot e Quarkus, organizada em três serviços.
+2. Trocar o banco de demonstração para SQLite para dispensar instalação de PostgreSQL.
+3. Permitir que frontend e APIs escutem em `0.0.0.0` no desenvolvimento e configurar host/portas via `.env`.
+4. Adicionar Maven Wrapper ao Quarkus após incompatibilidade do Maven global 3.8.7.
+5. Avaliar as quatro planilhas, identificar as quatro fazendas e exibir seus saldos históricos de forma separada.
+6. Mover o resumo de fazendas para a API/SQLite, permitir escrita por API e adicionar Swagger aos dois serviços.
+7. Registrar arquitetura e sequência em Mermaid e SVG.
+
+Este arquivo é um retrato do projeto, não uma fonte alternativa de dados operacionais. Ao alterar APIs, modelo, configuração ou importação, atualize também esta memória, o [README](../README.md), o [roteiro](ROTEIRO_AVALIACAO_APP.md) e os diagramas afetados.

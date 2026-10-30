@@ -1,0 +1,81 @@
+# Roteiro para iniciar e avaliar o Intergado
+
+O painel mostra **fazendas e solicitações de compra**. Os quatro saldos iniciais das fazendas foram cadastrados a partir do resumo de `01_Controle_gado.xlsx`; as linhas completas das planilhas de gado, manejo, ração e aplicação ainda não foram importadas. Veja a avaliação em [AVALIACAO_PLANILHAS_DASHBOARDS.md](AVALIACAO_PLANILHAS_DASHBOARDS.md).
+
+## 1. Iniciar
+
+No terminal, a partir da raiz do projeto:
+
+```bash
+cd /opt/devel/app/projeto_augusto
+docker compose up --build -d
+docker compose ps
+```
+
+O resultado esperado de `docker compose ps` é `purchases-api` e `analytics-api` como **healthy**, e `web` como **Up**. A primeira execução pode demorar porque baixa imagens e dependências. O SQLite é um arquivo compartilhado pelos serviços; não há contêiner nem porta de banco de dados.
+
+Abra **http://localhost:3000** no navegador da máquina que executa o Docker. Se o projeto roda em um servidor remoto, encaminhe a porta 3000 por SSH ou acesse o endereço desse servidor conforme sua rede permitir.
+
+Para executar os três serviços diretamente em **modo de desenvolvimento**, siga os comandos do [README](../README.md#desenvolvimento-local). Os endereços de escuta e portas ficam no `.env` da raiz; com os valores padrão, a interface fica em `http://IP_DA_MAQUINA:5173`.
+
+## 2. Conferir a tela inicial
+
+O painel deve abrir com o título **Visão das fazendas** e quatro cartões: Santa Cruz, Ilha Verde, Novo Mundo e Campo Verde. Cada cartão mostra a data e o saldo histórico da própria fazenda. Abaixo aparecem quatro indicadores de compras, gráfico de atividade, categorias e uma tabela de solicitações recentes. As compras iniciais são identificadas como **Exemplo**.
+
+No banco de demonstração recém-criado, os valores esperados são:
+
+| Indicador | Valor inicial |
+| --- | ---: |
+| Solicitações | 7 |
+| Em andamento | 5 |
+| Aguardando aprovação | 1 |
+| Valor estimado | R$ 54.650,00 |
+
+Se você já criou solicitações, os valores serão diferentes. O botão de atualização no topo recarrega os dados.
+
+## 3. Avaliar o fluxo principal
+
+1. Na tabela, busque por **pivô**. A solicitação “Peças para pivô central” deve aparecer. Limpe a busca e experimente o filtro **Aguardando aprovação**.
+2. Clique em **Nova solicitação**. Cadastre um item de teste, por exemplo: título `Mangueira de irrigação`, fazenda `Santa Cruz`, categoria `Manutenção`, solicitante `Teste de avaliação`, valor `250,00`. O campo fornecedor pode ficar vazio.
+3. Confirme que a nova linha aparece com status **Recebido** e que o total de solicitações aumenta em 1.
+4. Na coluna **Atualizar**, mude o status dessa linha para **Em cotação**. Confirme que o selo muda. Experimente o filtro **Em cotação**.
+5. Atualize a página do navegador. O registro e o status devem continuar lá, pois ficam salvos no arquivo SQLite.
+6. Volte ao topo e confira se os cartões e a distribuição por categoria refletem o item criado.
+
+O cadastro de teste permanece no banco. Esta versão não tem exclusão pela interface; use um título que deixe claro que se trata de teste.
+
+## 4. Conferir as APIs e o Swagger
+
+```bash
+curl --noproxy '*' -fsS http://localhost:3000/api/purchases
+curl --noproxy '*' -fsS http://localhost:3000/api/farms
+curl --noproxy '*' -fsS http://localhost:3000/api/analytics/overview
+```
+
+Abra `http://localhost:3000/swagger-ui/index.html` para cadastrar ou editar fazendas e compras. Abra `http://localhost:3000/q/swagger-ui` para consultar a documentação da API de indicadores. As APIs Java ficam atrás do Nginx, por isso essas URLs usam a mesma porta 3000 do site. Para testar uma edição sem criar dados extras, consulte primeiro o ID da fazenda e envie todos os campos no `PUT /api/farms/{id}`.
+
+## 5. Diagnosticar problemas
+
+```bash
+docker compose ps
+docker compose logs --tail=100 purchases-api analytics-api web
+```
+
+- **Tela não abre:** verifique se `web` está `Up` e se a porta 3000 está livre.
+- **Tela abre sem dados:** confira os logs de `purchases-api` e `analytics-api`.
+- **Dados iniciais não batem:** o volume SQLite persiste entre reinicializações. Verifique se já houve cadastros anteriores.
+
+## 6. Parar e reiniciar
+
+```bash
+docker compose down
+docker compose up -d
+```
+
+Esses comandos mantêm os dados. **Não use `docker compose down -v` se quiser preservá-los**, pois `-v` remove o volume que contém o arquivo SQLite.
+
+## O que avaliar nesta versão
+
+Observe clareza dos indicadores, nomes das categorias e status, facilidade de localizar uma compra, dados necessários no cadastro e fluxo real de aprovação da fazenda. Registre também quais campos precisam identificar fazenda, pasto, produto e responsável para integrar futuramente as planilhas.
+
+WhatsApp, IA, OpenSearch, Realtec, autenticação e a importação completa das planilhas não fazem parte desta versão inicial.

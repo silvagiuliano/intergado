@@ -170,6 +170,10 @@ docs/_build/
 # PyBuilder
 .pybuilder/
 target/
+.m2/
+/data/
+docs/xeon36
+.env copy.example
 
 # Jupyter Notebook
 .ipynb_checkpoints

@@ -1,0 +1,40 @@
+services:
+  purchases-api:
+    build: ./services/purchases-api
+    environment:
+      DB_URL: jdbc:sqlite:/data/intergado.db
+    volumes:
+      - sqlite_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  analytics-api:
+    build: ./services/analytics-api
+    environment:
+      DB_PATH: /data/intergado.db
+    volumes:
+      - sqlite_data:/data
+    depends_on:
+      purchases-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/q/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  web:
+    build: ./web
+    ports:
+      - "${APP_LISTEN_HOST:-0.0.0.0}:${WEB_PORT:-3000}:80"
+    depends_on:
+      purchases-api:
+        condition: service_healthy
+      analytics-api:
+        condition: service_healthy
+
+volumes:
+  sqlite_data:

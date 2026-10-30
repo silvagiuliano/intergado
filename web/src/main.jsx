@@ -1,0 +1,145 @@
+import React, { useEffect, useMemo, useState } from 'react'
+import { createRoot } from 'react-dom/client'
+import './style.css'
+
+const statusLabels = {
+  RECEIVED: 'Recebido', QUOTING: 'Em cotação', AWAITING_APPROVAL: 'Aguardando aprovação',
+  APPROVED: 'Aprovado', ORDERED: 'Pedido feito', DELIVERED: 'Entregue', PAID: 'Pago',
+}
+const statusOrder = Object.keys(statusLabels)
+const money = value => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value || 0))
+const integer = value => new Intl.NumberFormat('pt-BR').format(value)
+const date = value => new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' }).format(new Date(value))
+const Icon = ({ name, size = 20 }) => {
+  const paths = {
+    grid: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>,
+    box: <><path d="M3 7 12 3l9 4v10l-9 4-9-4z"/><path d="m3 7 9 4 9-4M12 11v10"/></>,
+    chart: <><path d="M4 20V10m6 10V4m6 16v-7m4 7V8"/></>,
+    plus: <path d="M12 5v14M5 12h14"/>,
+    search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
+    arrow: <path d="M5 12h14m-6-6 6 6-6 6"/>,
+    refresh: <><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.5 9A7 7 0 0 1 18 7l2 5M4 12l2 5a7 7 0 0 0 12.5-2"/></>,
+    check: <path d="m4 12 5 5L20 6"/>,
+    clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
+    leaf: <><path d="M20 4c-9 0-15 3-15 11a5 5 0 0 0 5 5c8 0 11-6 10-16Z"/><path d="M4 21c3-7 7-10 13-13"/></>,
+  }
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
+}
+
+async function readJson(url, options) {
+  const response = await fetch(url, options)
+  if (!response.ok) throw new Error(response.status === 400 ? 'Confira os dados informados.' : 'Não foi possível concluir a operação.')
+  return response.json()
+}
+
+function App() {
+  const [purchases, setPurchases] = useState([])
+  const [farms, setFarms] = useState([])
+  const [overview, setOverview] = useState(null)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [filter, setFilter] = useState('ALL')
+  const [farmFilter, setFarmFilter] = useState('ALL')
+  const [search, setSearch] = useState('')
+  const [showForm, setShowForm] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  async function load() {
+    try {
+      setError('')
+      const [items, metrics, farmItems] = await Promise.all([readJson('/api/purchases'), readJson('/api/analytics/overview'), readJson('/api/farms')])
+      setPurchases(items)
+      setOverview(metrics)
+      setFarms(farmItems)
+    } catch (e) { setError('Serviços indisponíveis. Verifique o ambiente e tente novamente.') }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { load() }, [])
+  const visible = useMemo(() => purchases.filter(item =>
+    (filter === 'ALL' || item.status === filter) &&
+    (farmFilter === 'ALL' || item.farm === farmFilter) &&
+    `${item.title} ${item.farm} ${item.supplier || ''}`.toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR'))
+  ), [purchases, filter, farmFilter, search])
+  const purchaseFarms = useMemo(() => [...new Set(purchases.map(item => item.farm))].sort((a, b) => a.localeCompare(b, 'pt-BR')), [purchases])
+
+  async function create(event) {
+    event.preventDefault()
+    const fields = Object.fromEntries(new FormData(event.currentTarget))
+    fields.amount = Number(fields.amount)
+    setSaving(true)
+    try {
+      await readJson('/api/purchases', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields) })
+      setShowForm(false)
+      await load()
+    } catch (e) { setError(e.message) }
+    finally { setSaving(false) }
+  }
+
+  async function changeStatus(id, status) {
+    try {
+      await readJson(`/api/purchases/${id}/status`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) })
+      await load()
+    } catch (e) { setError(e.message) }
+  }
+
+  const maxDay = Math.max(1, ...(overview?.recentDays || []).map(item => item.count))
+  const maxCategory = Math.max(1, ...(overview?.byCategory || []).map(item => Number(item.amount)))
+  return <div className="shell">
+    <aside className="sidebar">
+      <div className="brand"><span className="brand-mark"><Icon name="leaf" size={23}/></span><span>intergado<small>GESTÃO RURAL</small></span></div>
+      <div className="sidebar-caption">PAINEL DE CONTROLE</div>
+      <nav aria-label="Navegação principal">
+        <a className="nav-active" href="#visao"><Icon name="grid"/> Visão geral</a>
+        <a href="#fazendas"><Icon name="leaf"/> Fazendas</a>
+        <a href="#solicitacoes"><Icon name="box"/> Solicitações</a>
+        <a href="#indicadores"><Icon name="chart"/> Indicadores</a>
+        <a href="/swagger-ui/index.html" target="_blank" rel="noreferrer"><Icon name="box"/> API de cadastros</a>
+        <a href="/q/swagger-ui" target="_blank" rel="noreferrer"><Icon name="chart"/> API de indicadores</a>
+      </nav>
+      <div className="sidebar-bottom"><div className="sidebar-dot"/> Ambiente de demonstração <small>Compras ilustrativas · saldos históricos</small></div>
+    </aside>
+
+    <main id="visao" className="content">
+      <header className="topbar"><div className="breadcrumbs">Operação <span>/</span> Fazendas <span>/</span> <strong>Visão geral</strong></div><div className="topbar-right"><span className="live-dot"/> Compras atualizadas ao abrir <button className="refresh" onClick={load} title="Atualizar dados" aria-label="Atualizar dados"><Icon name="refresh" size={17}/></button></div></header>
+      <div className="page">
+        <div className="page-heading"><div><div className="eyebrow">INTELIGÊNCIA OPERACIONAL</div><h1>Visão das fazendas</h1><p>Consulte o histórico do rebanho por fazenda e acompanhe as compras da aplicação.</p></div><button className="primary" onClick={() => setShowForm(true)}><Icon name="plus" size={19}/> Nova solicitação</button></div>
+        {error && <div className="error" role="alert">{error} <button onClick={load}>Tentar novamente</button></div>}
+        {overview?.demoData && <div className="demo-note">As solicitações de compra são exemplos, não dados importados das planilhas. Bases criadas antes desta atualização podem conter a fazenda ilustrativa “Boa Vista”; esses registros foram preservados.</div>}
+        <section id="fazendas" className="farms-section" aria-labelledby="farms-title">
+          <div className="farms-heading"><div><div className="eyebrow">CADASTRO DE FAZENDAS</div><h2 id="farms-title">{farms.length} fazendas cadastradas</h2><p>Os quatro registros iniciais mostram saldos históricos das planilhas de 2021. Cadastre e atualize fazendas pela API de cadastros.</p></div><span className="small-tag">Dados via API</span></div>
+          <div className="farm-grid">{farms.map(farm => <article className="farm-card" key={farm.id}>
+            <div className="farm-card-head"><h3>{farm.name}</h3><span>Data do saldo: {farm.balanceDate.split('-').reverse().join('/')}</span></div>
+            <div className="farm-balance"><strong>{integer(farm.herdBalance)}</strong><span>cabeças · saldo registrado</span></div>
+            <div className="farm-adepara">Saldo Adepará registrado: <strong>{integer(farm.adeparaBalance)}</strong></div>
+            <div className="farm-sources" aria-label={`Fontes de ${farm.name}`}>{farm.sources.split(',').map(source => source.trim()).filter(Boolean).map(source => <span key={source}>{source}</span>)}</div>
+          </article>)}</div>
+          {farms.length === 0 && !loading && <p className="empty">Nenhuma fazenda cadastrada.</p>}
+          <p className="farm-source-note">Os quatro saldos iniciais vieram de <code>01_Controle_gado.xlsx</code>, com datas diferentes. A comparação com Adepará precisa de conciliação. Novos valores são inseridos pela API; a importação automática das planilhas ainda não está disponível.</p>
+        </section>
+        <div className="eyebrow purchase-eyebrow">COMPRAS · DADOS DA APLICAÇÃO</div>
+        <section className="metrics" aria-label="Indicadores principais">
+          <Metric label="Solicitações" value={overview?.total} detail="Total registrado" icon="box" tone="green" loading={loading}/>
+          <Metric label="Em andamento" value={overview?.active} detail="Aguardando conclusão" icon="refresh" tone="blue" loading={loading}/>
+          <Metric label="Aguardando aprovação" value={overview?.awaitingApproval} detail="Precisam de decisão" icon="clock" tone="amber" loading={loading}/>
+          <Metric label="Valor estimado" value={overview ? money(overview.estimatedAmount) : '—'} detail="Soma dos valores informados" icon="chart" tone="purple" loading={loading}/>
+        </section>
+
+        <section id="indicadores" className="insights">
+          <div className="panel activity"><div className="panel-head"><div><h2>Atividade recente</h2><p>Solicitações recebidas nos últimos 7 dias</p></div><span className="small-tag">7 dias</span></div><div className="chart-bars">{(overview?.recentDays || []).map(day => <div className="chart-col" key={day.date}><span className="chart-value">{day.count || ''}</span><div className="chart-track"><div style={{height: `${Math.max(day.count ? 13 : 3, day.count / maxDay * 100)}%`}} /></div><span className="chart-label">{new Intl.DateTimeFormat('pt-BR', { weekday: 'short' }).format(new Date(day.date + 'T12:00:00')).replace('.', '')}</span></div>)}</div></div>
+          <div className="panel category"><div className="panel-head"><div><h2>Por categoria</h2><p>Valor estimado das solicitações</p></div></div><div className="category-list">{(overview?.byCategory || []).map((group, i) => <div className="category-row" key={group.name}><div className="category-line"><span><i className={`category-dot dot-${i % 4}`}/>{group.name}</span><strong>{money(group.amount)}</strong></div><div className="progress"><span style={{width: `${Number(group.amount) / maxCategory * 100}%`}}/></div></div>)}{overview && !overview.byCategory.length && <p className="empty">Sem dados no período.</p>}</div></div>
+        </section>
+
+        <section id="solicitacoes" className="panel requests"><div className="panel-head request-head"><div><h2>Solicitações recentes</h2><p>Compras da aplicação; os exemplos não foram extraídos das planilhas.</p></div><div className="request-controls"><label className="search"><Icon name="search" size={17}/><input placeholder="Buscar solicitação" value={search} onChange={e => setSearch(e.target.value)} aria-label="Buscar solicitação"/></label><select value={farmFilter} onChange={e => setFarmFilter(e.target.value)} aria-label="Filtrar por fazenda"><option value="ALL">Todas as fazendas</option>{purchaseFarms.map(farm => <option key={farm} value={farm}>{farm}</option>)}</select><select value={filter} onChange={e => setFilter(e.target.value)} aria-label="Filtrar por status"><option value="ALL">Todos os status</option>{statusOrder.map(s => <option key={s} value={s}>{statusLabels[s]}</option>)}</select></div></div><div className="table-wrap"><table><thead><tr><th>SOLICITAÇÃO</th><th>FAZENDA</th><th>DATA</th><th>VALOR</th><th>STATUS</th><th>ATUALIZAR</th></tr></thead><tbody>{visible.map(item => <tr key={item.id}><td><span className="item-title">{item.title}</span><span className="item-sub">#{String(item.id).padStart(4, '0')} · {item.category}{item.demo ? ' · Exemplo' : ''}</span></td><td>{item.farm}</td><td>{date(item.requestedAt)}</td><td className="amount">{money(item.amount)}</td><td><span className={`badge badge-${item.status.toLowerCase()}`}>{statusLabels[item.status]}</span></td><td><select className="status-select" value={item.status} onChange={e => changeStatus(item.id, e.target.value)} aria-label={`Atualizar status de ${item.title}`}>{statusOrder.map(s => <option key={s} value={s}>{statusLabels[s]}</option>)}</select></td></tr>)}</tbody></table>{!loading && !visible.length && <div className="empty-table">Nenhuma solicitação encontrada.</div>}</div><div className="table-foot">Exibindo {visible.length} de {purchases.length} solicitações <span>Limite de 100 solicitações recentes</span></div></section>
+        <footer>Intergado · Gestão rural</footer>
+      </div>
+    </main>
+
+    {showForm && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setShowForm(false) }}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="close" onClick={() => setShowForm(false)} aria-label="Fechar">×</button><div className="eyebrow">NOVA ENTRADA</div><h2 id="modal-title">Nova solicitação</h2><p>Registre uma necessidade de compra. Ela entrará como “Recebido”.</p><form onSubmit={create}><label>O que precisa ser comprado?<input name="title" required maxLength="160" placeholder="Ex.: Peças para irrigação"/></label><div className="form-grid"><label>Fazenda<input name="farm" required maxLength="100" placeholder="Ex.: Santa Cruz"/></label><label>Categoria<select name="category" required><option>Insumos</option><option>Manutenção</option><option>Pecuária</option><option>Combustível</option><option>Outros</option></select></label></div><div className="form-grid"><label>Solicitante<input name="requester" required maxLength="100" placeholder="Nome ou equipe"/></label><label>Valor estimado (R$)<input name="amount" type="number" min="0" step="0.01" defaultValue="0" required/></label></div><label>Fornecedor (opcional)<input name="supplier" maxLength="120" placeholder="Ainda não definido"/></label><div className="modal-actions"><button type="button" className="secondary" onClick={() => setShowForm(false)}>Cancelar</button><button type="submit" className="primary" disabled={saving}>{saving ? 'Salvando...' : 'Criar solicitação'}</button></div></form></div></div>}
+  </div>
+}
+
+function Metric({ label, value, detail, icon, tone, loading }) {
+  return <div className="metric"><div className={`metric-icon ${tone}`}><Icon name={icon} size={21}/></div><div className="metric-label">{label}</div><div className="metric-value">{loading ? '—' : value ?? '—'}</div><div className="metric-detail">{detail}</div></div>
+}
+
+createRoot(document.getElementById('root')).render(<App />)
