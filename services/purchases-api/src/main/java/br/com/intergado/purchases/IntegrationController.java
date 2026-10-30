@@ -54,6 +54,11 @@ public class IntegrationController {
         return evolution.connect();
     }
 
+    @GetMapping("/evolution/groups")
+    public List<EvolutionClient.Group> groups() {
+        return evolution.groups();
+    }
+
     @PostMapping("/evolution/logout")
     public EvolutionClient.Connection logout() {
         evolution.logout();
@@ -62,8 +67,8 @@ public class IntegrationController {
 
     @PostMapping("/evolution/test")
     public List<WhatsAppNotifier.Delivery> test(HttpServletRequest request) {
-        if (settings.list("evolution", "testNumbers").isEmpty()) {
-            throw new IllegalArgumentException("Cadastre ao menos um número de teste antes de enviar.");
+        if (settings.list("evolution", "testNumbers").isEmpty() && settings.list("evolution", "groups").isEmpty()) {
+            throw new IllegalArgumentException("Cadastre ao menos um número de teste ou grupo antes de enviar.");
         }
         return whatsApp.sendTest((String) request.getAttribute(AuthController.EMAIL_ATTRIBUTE));
     }

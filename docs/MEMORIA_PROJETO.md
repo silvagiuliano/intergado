@@ -29,7 +29,7 @@ O material de contexto inclui o [resumo executivo](01_Resumo_Executivo_Caso_Augu
 | Documentação de API | Swagger/OpenAPI separado para Spring Boot e Quarkus. |
 | Login | Código de 6 dígitos enviado por e-mail via Resend para uma lista de e-mails autorizados. Sessão em cookie `HttpOnly` validada pelo Spring Boot e pelo Quarkus em todas as rotas `/api/*`. |
 | Integrações | Tela **Integrações** (React, `#integracoes`) e API `/api/integrations` para Evolution API (WhatsApp, fase de testes) e Resend. Valores da tela ficam em `integration_settings` e têm prioridade sobre o `.env`; segredos ficam só no `.env`. |
-| WhatsApp | Evolution API 2.3.7 em `compose.evolution.yaml`. Mensagem de teste e aviso automático de mudança de status, **apenas para números de teste**. Detalhes em [EVOLUTION_API.md](EVOLUTION_API.md). |
+| WhatsApp | Evolution API 2.3.7 em `compose.evolution.yaml`. Mensagem de teste e aviso automático de mudança de status, **apenas para números de teste e grupos cadastrados** (grupos escolhidos na tela com **Buscar grupos**). Detalhes em [EVOLUTION_API.md](EVOLUTION_API.md). |
 | HTTPS | Serviço `caddy` (2.11.7) no Compose, na frente do Nginx: certificado automático (Let's Encrypt para domínio público, CA interna para localhost/IP), HTTP → HTTPS mantendo a porta, compressão zstd/gzip. Configurado por `Caddyfile` e `CADDY_*`. |
 | Dados das planilhas | Apenas **quatro saldos históricos resumidos** entram no cadastro inicial. As linhas das planilhas não são importadas automaticamente. |
 
@@ -61,7 +61,7 @@ Navegador
 | [`services/purchases-api/src/main/java/br/com/intergado/purchases/ResendMailer.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/ResendMailer.java) | Envio do código pela API HTTP do Resend; sem chave, registra o código no log. |
 | [`services/purchases-api/src/main/java/br/com/intergado/purchases/IntegrationSettings.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/IntegrationSettings.java) | Definição dos campos de cada integração, validação e leitura tela > `.env` > padrão. |
 | [`services/purchases-api/src/main/java/br/com/intergado/purchases/IntegrationController.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/IntegrationController.java) | Rotas `/api/integrations` e ações do Evolution (estado, conectar, desconectar, teste). |
-| [`services/purchases-api/src/main/java/br/com/intergado/purchases/EvolutionClient.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/EvolutionClient.java), [`WhatsAppNotifier.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/WhatsAppNotifier.java) | Chamadas HTTP ao Evolution e envio aos números de teste (em segundo plano na mudança de status). |
+| [`services/purchases-api/src/main/java/br/com/intergado/purchases/EvolutionClient.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/EvolutionClient.java), [`WhatsAppNotifier.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/WhatsAppNotifier.java) | Chamadas HTTP ao Evolution (incluindo a lista de grupos) e envio aos números de teste e grupos (em segundo plano na mudança de status). |
 | [`Caddyfile`](../Caddyfile) | Caddy: endereço, modo de TLS e portas vindos do `.env`; redirecionamento explícito de HTTP para manter portas não padrão. |
 | [`compose.evolution.yaml`](../compose.evolution.yaml) | Evolution API, PostgreSQL e Redis próprios, apenas para testes. |
 | [`services/analytics-api/src/main/java/br/com/intergado/analytics/AuthFilter.java`](../services/analytics-api/src/main/java/br/com/intergado/analytics/AuthFilter.java) | Valida no Quarkus o mesmo cookie de sessão, consultando o SQLite. |
@@ -116,7 +116,7 @@ Chave `(integration, name)`, `value`, `updated_at` e `updated_by` (e-mail da ses
 | `POST` | `/api/auth/logout` | Spring Boot | Encerrar sessão (público). |
 | `GET` | `/api/integrations` | Spring Boot | Configuração das integrações. |
 | `PUT` | `/api/integrations/{chave}` | Spring Boot | Salvar campos de uma integração. |
-| `GET`, `POST` | `/api/integrations/evolution/{connection,connect,logout,test}` | Spring Boot | Estado, pareamento, desconexão e teste do WhatsApp. |
+| `GET`, `POST` | `/api/integrations/evolution/{connection,connect,groups,logout,test}` | Spring Boot | Estado, pareamento, grupos, desconexão e teste do WhatsApp. |
 | `GET` | `/api/farms` | Spring Boot | Listar fazendas. |
 | `GET` | `/api/farms/{id}` | Spring Boot | Consultar fazenda. |
 | `POST` | `/api/farms` | Spring Boot | Cadastrar fazenda e saldos. |
@@ -238,7 +238,7 @@ As dúvidas de negócio que bloqueiam indicadores mais fortes estão listadas no
 6. Mover o resumo de fazendas para a API/SQLite, permitir escrita por API e adicionar Swagger aos dois serviços.
 7. Registrar arquitetura e sequência em Mermaid e SVG.
 8. Adicionar login sem senha: código de 6 dígitos enviado via Resend, lista de e-mails autorizados por variável de ambiente e todas as rotas `/api/*` protegidas nas duas APIs (sem Spring Security; filtro próprio e sessão no SQLite).
-9. Fase 1 do WhatsApp: Evolution API 2.3.7 em Compose separado, tela **Integrações** para cadastrar dados dos integradores (valor da tela > `.env` > padrão, segredos só no `.env`), mensagens apenas para números de teste.
+9. Fase 1 do WhatsApp: Evolution API 2.3.7 em Compose separado, tela **Integrações** para cadastrar dados dos integradores (valor da tela > `.env` > padrão, segredos só no `.env`), mensagens apenas para números de teste e, depois, grupos escolhidos na tela (`WHATSAPP_GROUPS`).
 10. Adicionar Caddy na frente do Nginx para HTTPS, com endereço, modo de certificado e portas no `.env`; o Nginx e as rotas não mudaram.
 
 Este arquivo é um retrato do projeto, não uma fonte alternativa de dados operacionais. Ao alterar APIs, modelo, configuração ou importação, atualize também esta memória, o [README](../README.md), o [roteiro](ROTEIRO_AVALIACAO_APP.md) e os diagramas afetados.

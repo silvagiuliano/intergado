@@ -14,8 +14,8 @@ Depois, o pedido incluiu uma **tela de configuração de integradores**, para ca
 | --- | --- |
 | Evolution API | `compose.evolution.yaml`: `evoapicloud/evolution-api:v2.3.7` com PostgreSQL 15 e Redis 7 próprios. API e painel `/manager` em `http://127.0.0.1:8090`. |
 | Configuração | `.env` traz a URL, a chave global e os valores iniciais. A tela **Integrações** do painel grava alterações no SQLite (`integration_settings`) e tem prioridade sobre o `.env`. Campo vazio na tela volta a usar o `.env`. |
-| Envio | Spring Boot chama o Evolution (`/instance/*` e `/message/sendText/{instância}`). **Só os números de teste recebem mensagens.** |
-| Avisos automáticos | Quando ligados, uma mudança de status de compra para um dos status escolhidos gera mensagem aos números de teste, em segundo plano. |
+| Envio | Spring Boot chama o Evolution (`/instance/*`, `/group/fetchAllGroups/{instância}` e `/message/sendText/{instância}`). **Só os números de teste e os grupos cadastrados recebem mensagens.** |
+| Avisos automáticos | Quando ligados, uma mudança de status de compra para um dos status escolhidos gera mensagem aos números de teste e aos grupos, em segundo plano. |
 | Segurança | A chave do Evolution fica só no `.env`; a tela mostra apenas “Configurada” ou “Ausente”. As rotas `/api/integrations/*` exigem login. |
 
 ### Variáveis
@@ -29,6 +29,7 @@ Depois, o pedido incluiu uma **tela de configuração de integradores**, para ca
 | `EVOLUTION_INSTANCE` | sim | Nome da instância (conexão de WhatsApp). Padrão `intergado`. |
 | `EVOLUTION_INSTANCE_NUMBER` | sim | WhatsApp que envia, só dígitos com DDI e DDD (ex.: `5591999990000`). Com ele, o Evolution também gera um código de pareamento. |
 | `WHATSAPP_TEST_NUMBERS` | sim | Destinatários de teste, separados por vírgula. |
+| `WHATSAPP_GROUPS` | sim | Grupos de destino: identificadores terminados em `@g.us`, separados por vírgula. Mais fácil pela tela (**Buscar grupos**). |
 | `WHATSAPP_ENABLED` | sim | `true` liga os avisos automáticos de mudança de status. |
 | `WHATSAPP_NOTIFY_STATUSES` | sim | Status que geram aviso (ex.: `AWAITING_APPROVAL,APPROVED`). Vazio: todos. |
 
@@ -42,7 +43,8 @@ Depois, o pedido incluiu uma **tela de configuração de integradores**, para ca
 4. Confira “Chave global do Evolution API: Configurada”. Preencha **WhatsApp que envia** e **Números de teste** e clique em **Salvar**.
 5. Em **Conexão do WhatsApp**, clique em **Conectar / gerar código**. No celular que envia: WhatsApp → Dispositivos conectados → Conectar dispositivo. Escaneie o QR Code ou, se apareceu um código, escolha “Conectar com número de telefone” e digite-o.
 6. Clique em **Verificar conexão** até aparecer **Conectado**. Depois, **Enviar mensagem de teste**.
-7. Para os avisos automáticos, ligue **Enviar avisos automáticos**, escolha os status, salve e mude o status de uma solicitação no painel.
+7. Para grupos: em **Grupos de destino**, clique em **Buscar grupos**, marque os grupos que devem receber mensagens e clique em **Salvar**. O WhatsApp que envia precisa participar de cada grupo; em grupos onde só administradores enviam, ele precisa ser administrador. Envie a mensagem de teste de novo para conferir.
+8. Para os avisos automáticos, ligue **Enviar avisos automáticos**, escolha os status, salve e mude o status de uma solicitação no painel.
 
 Use um número de WhatsApp de testes para enviar: integrações não oficiais podem levar o WhatsApp a restringir o número.
 
@@ -62,12 +64,21 @@ Use um número de WhatsApp de testes para enviar: integrações não oficiais po
 | `PUT` | `/api/integrations/{evolution\|resend}` | Salva campos, ex.: `{ "testNumbers": "5591999990001", "enabled": "true" }` |
 | `GET` | `/api/integrations/evolution/connection` | Estado da instância |
 | `POST` | `/api/integrations/evolution/connect` | Cria a instância, se preciso, e devolve QR Code e código de pareamento |
+| `GET` | `/api/integrations/evolution/groups` | Grupos do WhatsApp conectado (`id`, `subject`, `size`, `announce`); `409` se não estiver conectado |
 | `POST` | `/api/integrations/evolution/logout` | Desconecta o WhatsApp |
-| `POST` | `/api/integrations/evolution/test` | Envia mensagem de teste aos números de teste |
+| `POST` | `/api/integrations/evolution/test` | Envia mensagem de teste aos números de teste e grupos |
 
 ## Verificado em 30/10/2026
 
 Com o Evolution 2.3.7 em Docker e o Spring Boot apontando para ele: leitura e gravação da configuração, validação de telefone, status e nome da instância, prioridade tela > `.env` > padrão, criação da instância e geração de QR Code real pelo WhatsApp, recusa imediata do envio sem pareamento, aviso automático disparado e barrado pela mesma regra, erro `502` com o Evolution parado. **O envio de uma mensagem a um número real não foi testado**, porque exige parear um celular.
+
+## Grupos
+
+Um único WhatsApp conectado envia para vários grupos. **Buscar grupos** lista os grupos de que o número participa, com nome, quantidade de participantes e se só administradores enviam. Grupos principais de comunidades não aparecem, porque não aceitam mensagens. O identificador salvo é o do WhatsApp (`120363...@g.us`); o nome não é guardado.
+
+Use grupos criados para os testes: mensagens automáticas em grupos grandes aumentam o risco de restrição do número.
+
+A validação dos identificadores tem teste unitário (`IntegrationSettingsTest`). A busca e o envio para grupos reais não foram testados, porque exigem um WhatsApp pareado.
 
 ## Próximas fases (fora do escopo)
 

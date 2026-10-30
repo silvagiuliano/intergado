@@ -12,7 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-/** Sends WhatsApp messages through Evolution API, only to the configured test numbers. */
+/** Sends WhatsApp messages through Evolution API, only to the configured test numbers and groups. */
 @Component
 public class WhatsAppNotifier {
     private static final Logger log = LoggerFactory.getLogger(WhatsAppNotifier.class);
@@ -34,6 +34,7 @@ public class WhatsAppNotifier {
         this.evolution = evolution;
     }
 
+    /** number is a phone number or a group id (ending in @g.us). */
     public record Delivery(String number, boolean sent, String error) {}
 
     /** Runs in the background so a slow or offline Evolution API never blocks the status change. */
@@ -47,17 +48,18 @@ public class WhatsAppNotifier {
             Status: %s → *%s*
             Valor estimado: %s""".formatted(purchase.id(), purchase.title(), purchase.farm(),
             LABELS.get(previous), LABELS.get(purchase.status()), money);
-        executor.submit(() -> sendToTestNumbers(text));
+        executor.submit(() -> sendToRecipients(text));
     }
 
     public List<Delivery> sendTest(String requestedBy) {
-        return sendToTestNumbers("*Intergado* · mensagem de teste enviada por " + requestedBy
+        return sendToRecipients("*Intergado* · mensagem de teste enviada por " + requestedBy
             + ". Se você recebeu, a integração com o Evolution API está funcionando.");
     }
 
-    private List<Delivery> sendToTestNumbers(String text) {
+    private List<Delivery> sendToRecipients(String text) {
         List<Delivery> result = new ArrayList<>();
-        List<String> numbers = settings.list("evolution", "testNumbers");
+        List<String> numbers = new ArrayList<>(settings.list("evolution", "testNumbers"));
+        numbers.addAll(settings.list("evolution", "groups"));
         // Evolution holds sends to an unpaired instance until the read timeout, so check first.
         String state;
         try {

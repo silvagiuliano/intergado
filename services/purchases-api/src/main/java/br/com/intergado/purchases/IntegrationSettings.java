@@ -17,7 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Component
 public class IntegrationSettings {
-    public enum FieldType { BOOLEAN, TEXT, PHONE, PHONE_LIST, STATUS_LIST }
+    public enum FieldType { BOOLEAN, TEXT, PHONE, PHONE_LIST, GROUP_LIST, STATUS_LIST }
 
     public record Field(String name, String label, FieldType type, String envName, String fallback,
                         String pattern, String help) {}
@@ -36,16 +36,18 @@ public class IntegrationSettings {
     public static final Map<String, Definition> DEFINITIONS = new LinkedHashMap<>();
     static {
         DEFINITIONS.put("evolution", new Definition("evolution", "WhatsApp · Evolution API",
-            "Envio de mensagens de WhatsApp pelo Evolution API (fase de testes). As mensagens só vão para os números de teste.",
+            "Envio de mensagens de WhatsApp pelo Evolution API (fase de testes). As mensagens só vão para os números de teste e os grupos cadastrados.",
             List.of(
                 new Field("enabled", "Enviar avisos automáticos", FieldType.BOOLEAN, "WHATSAPP_ENABLED", "false", null,
-                    "Avisa os números de teste quando uma solicitação de compra muda de status."),
+                    "Avisa os números de teste e os grupos quando uma solicitação de compra muda de status."),
                 new Field("instanceName", "Nome da instância", FieldType.TEXT, "EVOLUTION_INSTANCE", "intergado",
                     "[A-Za-z0-9_-]{1,50}", "Identificador da conexão no Evolution API. Letras, números, - e _."),
                 new Field("senderNumber", "WhatsApp que envia", FieldType.PHONE, "EVOLUTION_INSTANCE_NUMBER", "", null,
                     "Número do celular conectado, com DDI e DDD, só dígitos. Ex.: 5591999990000. Usado no código de pareamento."),
                 new Field("testNumbers", "Números de teste (destinatários)", FieldType.PHONE_LIST, "WHATSAPP_TEST_NUMBERS", "", null,
                     "Um por linha ou separados por vírgula, com DDI e DDD. Só esses números recebem mensagens."),
+                new Field("groups", "Grupos de destino", FieldType.GROUP_LIST, "WHATSAPP_GROUPS", "", null,
+                    "Identificadores dos grupos (terminam em @g.us), um por linha. Use \"Buscar grupos\" com o WhatsApp conectado; o número que envia precisa participar do grupo."),
                 new Field("notifyStatuses", "Status que geram aviso", FieldType.STATUS_LIST, "WHATSAPP_NOTIFY_STATUSES",
                     ALL_STATUSES, null, "Avisar quando a solicitação passar para um destes status.")),
             List.of(
@@ -137,6 +139,8 @@ public class IntegrationSettings {
             case PHONE -> phone(field, value);
             case PHONE_LIST -> String.join(",", Arrays.stream(value.split("[,;\\n]+")).map(String::trim)
                 .filter(item -> !item.isEmpty()).map(item -> phone(field, item)).distinct().toList());
+            case GROUP_LIST -> String.join(",", Arrays.stream(value.split("[,;\\s]+")).map(String::trim)
+                .filter(item -> !item.isEmpty()).map(item -> group(field, item)).distinct().toList());
             case STATUS_LIST -> {
                 List<String> statuses = Arrays.stream(value.split("[,\\s]+")).filter(item -> !item.isBlank()).distinct().toList();
                 for (String status : statuses) {
@@ -151,6 +155,11 @@ public class IntegrationSettings {
         String digits = value.replaceAll("[\\s()+.-]", "");
         if (!digits.matches("\\d{10,15}")) throw invalid(field, "use DDI + DDD + número, só dígitos (ex.: 5591999990000)");
         return digits;
+    }
+
+    private static String group(Field field, String value) {
+        if (!value.matches("\\d{5,30}(-\\d{5,20})?@g\\.us")) throw invalid(field, "identificador de grupo inválido: " + value);
+        return value;
     }
 
     private static IllegalArgumentException invalid(Field field, String reason) {

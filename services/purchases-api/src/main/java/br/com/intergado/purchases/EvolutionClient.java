@@ -2,6 +2,7 @@ package br.com.intergado.purchases;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -21,6 +22,9 @@ public class EvolutionClient {
 
     /** Connection state plus, when not connected yet, the pairing code and QR Code image. */
     public record Connection(String instance, String state, String pairingCode, String qrBase64) {}
+
+    /** A WhatsApp group the connected number belongs to; announce means only admins can send. */
+    public record Group(String id, String subject, Integer size, boolean announce) {}
 
     public boolean configured() {
         return !apiKey().isEmpty();
@@ -68,6 +72,22 @@ public class EvolutionClient {
     public void sendText(String number, String text) {
         client().post().uri("/message/sendText/{instance}", instance()).contentType(MediaType.APPLICATION_JSON)
             .body(Map.of("number", number, "text", text)).retrieve().toBodilessEntity();
+    }
+
+    public List<Group> groups() {
+        if (!"open".equals(state().state())) throw new IllegalStateException("Conecte o WhatsApp antes de buscar os grupos.");
+        List<?> body = client().get().uri("/group/fetchAllGroups/{instance}?getParticipants=false", instance())
+            .retrieve().body(List.class);
+        if (body == null) return List.of();
+        // A community's parent group does not accept messages; its announcement subgroup is listed separately.
+        return body.stream().filter(Map.class::isInstance).map(Map.class::cast)
+            .filter(group -> !Boolean.TRUE.equals(group.get("isCommunity"))).map(group -> new Group(
+                text(group, "id"), text(group, "subject"),
+                group.get("size") instanceof Number size ? size.intValue() : null,
+                Boolean.TRUE.equals(group.get("announce"))))
+            .filter(group -> group.id() != null)
+            .sorted((a, b) -> String.CASE_INSENSITIVE_ORDER.compare(String.valueOf(a.subject()), String.valueOf(b.subject())))
+            .toList();
     }
 
     public void logout() {

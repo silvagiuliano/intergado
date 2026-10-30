@@ -35,7 +35,7 @@ docker compose -f compose.yaml -f compose.evolution.yaml up -d   # aplicação +
 docker compose -f compose.evolution.yaml up -d                   # só o Evolution, para os scripts dev-*.sh
 ```
 
-Defina `EVOLUTION_API_KEY` no `.env` antes. O passo a passo de pareamento e teste está em [docs/EVOLUTION_API.md](docs/EVOLUTION_API.md). As mensagens só vão para os números de teste cadastrados.
+Defina `EVOLUTION_API_KEY` no `.env` antes. O passo a passo de pareamento e teste está em [docs/EVOLUTION_API.md](docs/EVOLUTION_API.md). As mensagens só vão para os números de teste e os grupos cadastrados na tela.
 
 ## Iniciar com Docker
 
@@ -142,7 +142,7 @@ O Quarkus exige Maven 3.9 ou superior. `./dev-quarkus.sh` usa o Maven Wrapper do
 | PUT | `/api/farms/{id}` | Edita a fazenda; ao renomeá-la, atualiza o nome nas compras associadas |
 | GET | `/api/integrations` | Configuração das integrações (Evolution, Resend) |
 | PUT | `/api/integrations/{chave}` | Salva campos de uma integração |
-| GET/POST | `/api/integrations/evolution/...` | `connection`, `connect`, `logout` e `test` do WhatsApp |
+| GET/POST | `/api/integrations/evolution/...` | `connection`, `connect`, `groups`, `logout` e `test` do WhatsApp |
 | GET | `/api/analytics/overview` | Totais, valores e séries para o dashboard |
 | GET | `/actuator/health` | Saúde do Spring Boot |
 | GET | `/q/health/ready` | Prontidão do Quarkus |

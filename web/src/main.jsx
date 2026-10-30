@@ -251,7 +251,7 @@ function Integrations({ onExpired }) {
 }
 
 function IntegrationCard({ integration, onSaved, onExpired }) {
-  const initial = () => Object.fromEntries(integration.fields.map(f => [f.name, f.type === 'PHONE_LIST' ? f.value.split(',').filter(Boolean).join('\n') : f.value]))
+  const initial = () => Object.fromEntries(integration.fields.map(f => [f.name, ['PHONE_LIST', 'GROUP_LIST'].includes(f.type) ? f.value.split(',').filter(Boolean).join('\n') : f.value]))
   const [values, setValues] = useState(initial)
   const [status, setStatus] = useState({ busy: false, message: '', error: '' })
   useEffect(() => { setValues(initial()) }, [integration])
@@ -269,6 +269,7 @@ function IntegrationCard({ integration, onSaved, onExpired }) {
   function input(field) {
     const value = values[field.name] ?? ''
     if (field.type === 'BOOLEAN') return <label className="switch"><input type="checkbox" checked={value === 'true'} onChange={e => set(field.name, String(e.target.checked))}/> {value === 'true' ? 'Ligado' : 'Desligado'}</label>
+    if (field.type === 'GROUP_LIST') return <GroupPicker value={value} onChange={v => set(field.name, v)} onExpired={onExpired}/>
     if (field.type === 'PHONE_LIST') return <textarea rows="3" value={value} onChange={e => set(field.name, e.target.value)} placeholder="5591999990000"/>
     if (field.type === 'STATUS_LIST') {
       const selected = value.split(',').filter(Boolean)
@@ -292,6 +293,32 @@ function IntegrationCard({ integration, onSaved, onExpired }) {
     </form>
     {integration.key === 'evolution' && <EvolutionConnection onExpired={onExpired}/>}
   </section>
+}
+
+function GroupPicker({ value, onChange, onExpired }) {
+  const [groups, setGroups] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const selected = value.split(/[\s,;]+/).filter(Boolean)
+  async function load() {
+    setBusy(true); setError('')
+    try { setGroups(await readJson('/api/integrations/evolution/groups')) }
+    catch (e) { e instanceof Unauthorized ? onExpired() : setError(e.message) }
+    finally { setBusy(false) }
+  }
+  const toggle = id => onChange((selected.includes(id) ? selected.filter(s => s !== id) : [...selected, id]).join('\n'))
+  return <div className="groups">
+    <textarea rows="3" value={value} onChange={e => onChange(e.target.value)} placeholder="120363000000000000@g.us"/>
+    <div className="groups-actions">
+      <button type="button" className="secondary" disabled={busy} onClick={load}>{busy ? 'Buscando...' : groups ? 'Atualizar grupos' : 'Buscar grupos'}</button>
+      {groups && <small>{groups.length ? `${groups.length} grupo(s) do WhatsApp conectado. Marque os que recebem mensagens.` : 'O WhatsApp conectado não participa de nenhum grupo.'}</small>}
+    </div>
+    {error && <div className="error" role="alert">{error}</div>}
+    {groups?.length > 0 && <div className="group-options">{groups.map(g => <label key={g.id}>
+      <input type="checkbox" checked={selected.includes(g.id)} onChange={() => toggle(g.id)}/>
+      <span><strong>{g.subject || 'Sem nome'}</strong> <code>{g.id}</code>{g.size ? ` · ${g.size} participantes` : ''}{g.announce ? ' · só administradores enviam' : ''}</span>
+    </label>)}</div>}
+  </div>
 }
 
 function EvolutionConnection({ onExpired }) {
