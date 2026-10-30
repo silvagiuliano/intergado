@@ -1,6 +1,6 @@
 # Diagramas da aplicação Intergado
 
-Os diagramas abaixo representam a implementação atual com Docker Compose e SQLite. Em desenvolvimento local, o Vite serve o React na porta `APP_DEV_PORT` e encaminha as mesmas rotas para as APIs.
+Os diagramas abaixo representam a implementação atual com Docker Compose, SQLite e login por código enviado por e-mail. Em desenvolvimento local, o Vite serve o React na porta `APP_DEV_PORT` e encaminha as mesmas rotas para as APIs.
 
 Versões para abrir ou compartilhar: [arquitetura em SVG](ARQUITETURA_APP.svg) e [sequência em SVG](SEQUENCIA_APP.svg).
 
@@ -16,19 +16,22 @@ flowchart LR
         A["API de indicadores<br/>Quarkus / Java<br/>porta 8081"]
         DB[("SQLite<br/>volume sqlite_data")]
 
-        W -->|"/api/farms e /api/purchases<br/>/swagger-ui e /v3/api-docs"| P
+        W -->|"/api/auth, /api/farms e /api/purchases<br/>/swagger-ui e /v3/api-docs"| P
         W -->|"/api/analytics<br/>/q/swagger-ui e /q/openapi"| A
-        P -->|"cadastro, edição e consulta"| DB
-        A -->|"consulta e agregação"| DB
+        P -->|"cadastros, códigos e sessões"| DB
+        A -->|"valida sessão, consulta e agrega"| DB
     end
+
+    P -->|"HTTPS: código de acesso<br/>RESEND_API_KEY"| R["Resend<br/>envio de e-mail"]
+    R -.->|"e-mail com código de 6 dígitos"| U
 
     XLSX["Planilhas em docs/planilhas"] -.->|"resumo histórico extraído na preparação dos dados"| SEED["schema.sql + data.sql"]
     SEED -.->|"inicialização do SQLite"| P
 ```
 
-As APIs compartilham o mesmo arquivo SQLite. O Spring Boot cria as tabelas e os registros iniciais; o Quarkus lê os dados para calcular indicadores. Os quatro saldos de fazendas cadastrados inicialmente são históricos, de 2021. As planilhas XLSX **não são importadas automaticamente** a cada execução.
+As APIs compartilham o mesmo arquivo SQLite. O Spring Boot cria as tabelas e os registros iniciais, gera os códigos de acesso e as sessões; o Quarkus lê os dados para calcular indicadores. As duas APIs validam o cookie `intergado_session` contra a tabela `sessions` em todas as rotas `/api/*`, exceto as de login. O Spring Boot é o único serviço que chama o Resend; sem `RESEND_API_KEY`, o código vai apenas para o log. Os quatro saldos de fazendas cadastrados inicialmente são históricos, de 2021. As planilhas XLSX **não são importadas automaticamente** a cada execução.
 
-## Sequência: abrir o painel e criar uma solicitação
+## Sequência: login, abrir o painel e criar uma solicitação
 
 ```mermaid
 sequenceDiagram
@@ -39,10 +42,34 @@ sequenceDiagram
     participant Spring as Spring Boot
     participant Quarkus as Quarkus
     participant SQLite as SQLite
+    participant Resend as Resend
 
     Usuario->>React: Abre o dashboard
     React->>Web: GET /
     Web-->>React: HTML, JavaScript e CSS
+    React->>Web: GET /api/auth/me
+    Web->>Spring: Encaminha GET /api/auth/me
+    Spring-->>React: 401 sem sessão
+    React-->>Usuario: Tela de login
+
+    Usuario->>React: Informa o e-mail
+    React->>Web: POST /api/auth/request-code
+    Web->>Spring: Encaminha POST /api/auth/request-code
+    opt E-mail ativo em users e sem código nos últimos 60 s
+        Spring->>SQLite: INSERT login_codes (hash, validade 10 min)
+        Spring->>Resend: POST /emails com o código
+        Resend-->>Usuario: E-mail com código de 6 dígitos
+    end
+    Spring-->>React: 202 com mensagem genérica
+
+    Usuario->>React: Digita o código
+    React->>Web: POST /api/auth/verify
+    Web->>Spring: Encaminha POST /api/auth/verify
+    Spring->>SQLite: Confere hash, tentativas e validade
+    Spring->>SQLite: Marca código usado e INSERT sessions
+    Spring-->>React: 200 + Set-Cookie intergado_session (HttpOnly)
+
+    Note over React,Quarkus: Daqui em diante o navegador envia o cookie.<br/>Spring Boot e Quarkus validam a sessão em sessions antes de cada rota /api/*
 
     par Fazendas
         React->>Web: GET /api/farms
@@ -81,4 +108,4 @@ sequenceDiagram
     React-->>Usuario: Exibe a nova solicitação e os indicadores
 ```
 
-O formulário usa `POST /api/purchases`; a mudança de status usa `PUT /api/purchases/{id}/status`. O Swagger de cadastros permite também `POST` e `PUT /api/farms` e `PUT /api/purchases/{id}`. Consulte os endpoints no [README](../README.md#endpoints).
+Sem sessão válida, qualquer rota `/api/*` responde `401` e o React volta para a tela de login; o botão **Sair** chama `POST /api/auth/logout`. O formulário usa `POST /api/purchases`; a mudança de status usa `PUT /api/purchases/{id}/status`. O Swagger de cadastros permite também `POST` e `PUT /api/farms` e `PUT /api/purchases/{id}`. Consulte os endpoints no [README](../README.md#endpoints).

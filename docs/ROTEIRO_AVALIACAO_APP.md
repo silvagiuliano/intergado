@@ -8,6 +8,7 @@ No terminal, a partir da raiz do projeto:
 
 ```bash
 cd /opt/devel/app/projeto_augusto
+cp -n .env.example .env   # preencha AUTH_ALLOWED_EMAILS e RESEND_API_KEY
 docker compose up --build -d
 docker compose ps
 ```
@@ -18,9 +19,13 @@ Abra **http://localhost:3000** no navegador da máquina que executa o Docker. Se
 
 Para executar os três serviços diretamente em **modo de desenvolvimento**, siga os comandos do [README](../README.md#desenvolvimento-local). Os endereços de escuta e portas ficam no `.env` da raiz; com os valores padrão, a interface fica em `http://IP_DA_MAQUINA:5173`.
 
-## 2. Conferir a tela inicial
+## 2. Entrar
 
-O painel deve abrir com o título **Visão das fazendas** e quatro cartões: Santa Cruz, Ilha Verde, Novo Mundo e Campo Verde. Cada cartão mostra a data e o saldo histórico da própria fazenda. Abaixo aparecem quatro indicadores de compras, gráfico de atividade, categorias e uma tabela de solicitações recentes. As compras iniciais são identificadas como **Exemplo**.
+A primeira tela pede um e-mail. Informe um endereço listado em `AUTH_ALLOWED_EMAILS`, clique em **Enviar código** e digite o código de 6 dígitos recebido. Sem `RESEND_API_KEY`, o código aparece no log: `docker compose logs purchases-api | grep "Código de acesso"`. O e-mail logado e o botão **Sair** ficam no topo do painel.
+
+## 3. Conferir a tela inicial
+
+Depois do login, o painel deve abrir com o título **Visão das fazendas** e quatro cartões: Santa Cruz, Ilha Verde, Novo Mundo e Campo Verde. Cada cartão mostra a data e o saldo histórico da própria fazenda. Abaixo aparecem quatro indicadores de compras, gráfico de atividade, categorias e uma tabela de solicitações recentes. As compras iniciais são identificadas como **Exemplo**.
 
 No banco de demonstração recém-criado, os valores esperados são:
 
@@ -33,7 +38,7 @@ No banco de demonstração recém-criado, os valores esperados são:
 
 Se você já criou solicitações, os valores serão diferentes. O botão de atualização no topo recarrega os dados.
 
-## 3. Avaliar o fluxo principal
+## 4. Avaliar o fluxo principal
 
 1. Na tabela, busque por **pivô**. A solicitação “Peças para pivô central” deve aparecer. Limpe a busca e experimente o filtro **Aguardando aprovação**.
 2. Clique em **Nova solicitação**. Cadastre um item de teste, por exemplo: título `Mangueira de irrigação`, fazenda `Santa Cruz`, categoria `Manutenção`, solicitante `Teste de avaliação`, valor `250,00`. O campo fornecedor pode ficar vazio.
@@ -44,17 +49,21 @@ Se você já criou solicitações, os valores serão diferentes. O botão de atu
 
 O cadastro de teste permanece no banco. Esta versão não tem exclusão pela interface; use um título que deixe claro que se trata de teste.
 
-## 4. Conferir as APIs e o Swagger
+## 5. Conferir as APIs e o Swagger
+
+As rotas `/api/*` exigem sessão. Pelo terminal, peça o código, confirme-o guardando o cookie e use-o nas chamadas:
 
 ```bash
-curl --noproxy '*' -fsS http://localhost:3000/api/purchases
-curl --noproxy '*' -fsS http://localhost:3000/api/farms
-curl --noproxy '*' -fsS http://localhost:3000/api/analytics/overview
+curl --noproxy '*' -fsS -X POST -H 'Content-Type: application/json' -d '{"email":"seu@email.com"}' http://localhost:3000/api/auth/request-code
+curl --noproxy '*' -fsS -c /tmp/intergado.cookies -X POST -H 'Content-Type: application/json' -d '{"email":"seu@email.com","code":"123456"}' http://localhost:3000/api/auth/verify
+curl --noproxy '*' -fsS -b /tmp/intergado.cookies http://localhost:3000/api/purchases
+curl --noproxy '*' -fsS -b /tmp/intergado.cookies http://localhost:3000/api/farms
+curl --noproxy '*' -fsS -b /tmp/intergado.cookies http://localhost:3000/api/analytics/overview
 ```
 
-Abra `http://localhost:3000/swagger-ui/index.html` para cadastrar ou editar fazendas e compras. Abra `http://localhost:3000/q/swagger-ui` para consultar a documentação da API de indicadores. As APIs Java ficam atrás do Nginx, por isso essas URLs usam a mesma porta 3000 do site. Para testar uma edição sem criar dados extras, consulte primeiro o ID da fazenda e envie todos os campos no `PUT /api/farms/{id}`.
+No navegador, faça login no painel antes de usar o Swagger: ele aproveita o mesmo cookie. Abra `http://localhost:3000/swagger-ui/index.html` para cadastrar ou editar fazendas e compras. Abra `http://localhost:3000/q/swagger-ui` para consultar a documentação da API de indicadores. As APIs Java ficam atrás do Nginx, por isso essas URLs usam a mesma porta 3000 do site. Para testar uma edição sem criar dados extras, consulte primeiro o ID da fazenda e envie todos os campos no `PUT /api/farms/{id}`.
 
-## 5. Diagnosticar problemas
+## 6. Diagnosticar problemas
 
 ```bash
 docker compose ps
@@ -62,10 +71,12 @@ docker compose logs --tail=100 purchases-api analytics-api web
 ```
 
 - **Tela não abre:** verifique se `web` está `Up` e se a porta 3000 está livre.
+- **Código não chega:** procure `Falha ao enviar` em `docker compose logs purchases-api`. Confira `RESEND_API_KEY` e se o remetente usa um domínio verificado; `onboarding@resend.dev` só entrega para o dono da conta Resend. Novo código só é gerado 60 segundos após o anterior.
+- **E-mail correto, mas nada acontece:** ele precisa estar em `AUTH_ALLOWED_EMAILS`, e o serviço precisa ser reiniciado depois de mudar a lista (`docker compose up -d`).
 - **Tela abre sem dados:** confira os logs de `purchases-api` e `analytics-api`.
 - **Dados iniciais não batem:** o volume SQLite persiste entre reinicializações. Verifique se já houve cadastros anteriores.
 
-## 6. Parar e reiniciar
+## 7. Parar e reiniciar
 
 ```bash
 docker compose down
@@ -78,4 +89,4 @@ Esses comandos mantêm os dados. **Não use `docker compose down -v` se quiser p
 
 Observe clareza dos indicadores, nomes das categorias e status, facilidade de localizar uma compra, dados necessários no cadastro e fluxo real de aprovação da fazenda. Registre também quais campos precisam identificar fazenda, pasto, produto e responsável para integrar futuramente as planilhas.
 
-WhatsApp, IA, OpenSearch, Realtec, autenticação e a importação completa das planilhas não fazem parte desta versão inicial.
+WhatsApp, IA, OpenSearch, Realtec, perfis de permissão e a importação completa das planilhas não fazem parte desta versão inicial.

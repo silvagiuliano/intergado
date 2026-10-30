@@ -17,7 +17,7 @@ Veja também os [diagramas de arquitetura e sequência](docs/DIAGRAMAS_ARQUITETU
 | `analytics-api` | Java 17 + Quarkus 3 + Maven | Indicadores agregados e Swagger de consultas |
 | `sqlite_data` | Arquivo SQLite em volume Docker | Persistência compartilhada entre os serviços |
 
-O Nginx encaminha `/api/purchases` ao Spring Boot e `/api/analytics` ao Quarkus. Os serviços Java usam o mesmo arquivo; o Spring Boot cria as tabelas e os dados de demonstração antes de o Quarkus iniciar. Não é necessário instalar ou executar um servidor de banco de dados. Os dados iniciais são **apenas exemplos**, identificados no banco e no painel.
+O Nginx encaminha `/api/auth`, `/api/farms` e `/api/purchases` ao Spring Boot e `/api/analytics` ao Quarkus. Os serviços Java usam o mesmo arquivo; o Spring Boot cria as tabelas e os dados de demonstração antes de o Quarkus iniciar. Não é necessário instalar ou executar um servidor de banco de dados. Os dados iniciais são **apenas exemplos**, identificados no banco e no painel.
 
 O bloco **Fazendas** consulta `GET /api/farms`. A base nova contém Santa Cruz, Ilha Verde, Novo Mundo e Campo Verde, com o último saldo datado e o saldo Adepará de cada aba de `docs/planilhas/01_Controle_gado.xlsx`. Os registros iniciais são de 2021 e podem ser editados pela API. Ainda não há importação automática de todas as linhas das planilhas. As compras demonstrativas são independentes desses saldos. Em bases SQLite antigas, exemplos com a fazenda fictícia `Boa Vista` permanecem intactos; novas bases usam os nomes das quatro fazendas nos exemplos.
 
@@ -32,7 +32,26 @@ docker compose up --build -d
 
 Abra **http://localhost:3000**. `APP_LISTEN_HOST` e `WEB_PORT` em `.env` controlam o endereço e a porta publicados pelo Docker Compose. Para ver logs: `docker compose logs -f`. Para parar: `docker compose down`. O arquivo SQLite persiste no volume `sqlite_data`; `docker compose down -v` também remove os dados.
 
-Para produção, são necessários autenticação, HTTPS, backup e controle de acesso; esta entrega é um ambiente inicial de demonstração.
+Para produção, ainda são necessários HTTPS, backup e perfis de permissão; esta entrega é um ambiente inicial de demonstração.
+
+## Login por e-mail
+
+O acesso usa um código de 6 dígitos enviado por e-mail pelo [Resend](https://resend.com). Antes de iniciar, preencha no `.env`:
+
+| Variável | Padrão | Uso |
+| --- | --- | --- |
+| `AUTH_ALLOWED_EMAILS` | vazio | E-mails autorizados, separados por vírgula. Vazio: ninguém entra |
+| `RESEND_API_KEY` | vazio | Chave da API do Resend. Vazio: o código aparece só no log do Spring Boot |
+| `AUTH_EMAIL_FROM` | `Intergado <onboarding@resend.dev>` | Remetente; use um domínio verificado no Resend |
+| `AUTH_COOKIE_SECURE` | `false` | Use `true` quando o site estiver em HTTPS |
+| `AUTH_CODE_MINUTES` | `10` | Validade do código |
+| `AUTH_SESSION_DAYS` | `7` | Validade da sessão |
+
+O remetente de teste `onboarding@resend.dev` só entrega para o e-mail dono da conta Resend. Para outros destinatários, verifique um domínio no Resend.
+
+A lista de e-mails é sincronizada com a tabela `users` a cada inicialização do Spring Boot; quem sai da lista perde as sessões abertas. O código expira em 10 minutos, aceita 5 tentativas e só pode ser usado uma vez; um novo código só é gerado 60 segundos após o anterior. A resposta ao pedido de código é sempre a mesma, para não revelar quais e-mails estão autorizados. Se o envio pelo Resend falhar, o erro aparece no log do Spring Boot.
+
+A sessão é um cookie `HttpOnly` (`intergado_session`, `SameSite=Lax`) guardado como hash na tabela `sessions`. O Spring Boot e o Quarkus validam esse cookie em todas as rotas `/api/*`, exceto `request-code`, `verify` e `logout`. O Swagger continua abrindo, mas as chamadas só funcionam depois do login no mesmo navegador.
 
 ## Desenvolvimento local
 
@@ -61,7 +80,7 @@ Os scripts criam `data/` e leem `.env` da raiz. Você pode alterar os endereços
 | `ANALYTICS_API_PORT` | `8081` | Porta do Quarkus em dev |
 | `WEB_PORT` | `3000` | Porta do site em Docker Compose |
 
-O Vite redireciona `/api/purchases` e `/api/analytics` para as portas configuradas. Se as APIs estiverem em outra máquina, defina também `PURCHASES_API_URL` e `ANALYTICS_API_URL` em `.env`. Para acessar pela rede, abra `http://IP_DA_MAQUINA:5173`. Ambos os serviços Java usam `data/intergado.db` por padrão, relativo à raiz do projeto. Em Docker, o arquivo fica no volume `sqlite_data`.
+O Vite redireciona `/api/auth`, `/api/farms`, `/api/purchases` e `/api/analytics` para as portas configuradas. Se as APIs estiverem em outra máquina, defina também `PURCHASES_API_URL` e `ANALYTICS_API_URL` em `.env`. Para acessar pela rede, abra `http://IP_DA_MAQUINA:5173`. Ambos os serviços Java usam `data/intergado.db` por padrão, relativo à raiz do projeto. Em Docker, o arquivo fica no volume `sqlite_data`.
 
 Se o painel mostrar **“Serviços indisponíveis”**, confirme que os dois serviços estão ativos: `curl http://127.0.0.1:8080/actuator/health` e `curl http://127.0.0.1:8081/q/health/ready` (ajuste as portas se as alterou).
 
@@ -71,6 +90,10 @@ O Quarkus exige Maven 3.9 ou superior. `./dev-quarkus.sh` usa o Maven Wrapper do
 
 | Método | Rota | Uso |
 | --- | --- | --- |
+| POST | `/api/auth/request-code` | Envia código para `{ "email": "..." }` se o e-mail estiver autorizado (sempre `202`) |
+| POST | `/api/auth/verify` | Valida `{ "email": "...", "code": "123456" }` e cria o cookie de sessão |
+| GET | `/api/auth/me` | E-mail da sessão atual |
+| POST | `/api/auth/logout` | Encerra a sessão |
 | GET | `/api/purchases` | Até 100 solicitações recentes; aceita `?status=RECEIVED` |
 | GET | `/api/purchases/{id}` | Detalhe de uma solicitação |
 | POST | `/api/purchases` | Cria uma solicitação com `title`, `farm`, `category`, `requester`, `supplier` opcional e `amount` |
@@ -83,6 +106,8 @@ O Quarkus exige Maven 3.9 ou superior. `./dev-quarkus.sh` usa o Maven Wrapper do
 | GET | `/api/analytics/overview` | Totais, valores e séries para o dashboard |
 | GET | `/actuator/health` | Saúde do Spring Boot |
 | GET | `/q/health/ready` | Prontidão do Quarkus |
+
+As demais rotas `/api/*` respondem `401` sem sessão válida.
 
 Status disponíveis: `RECEIVED`, `QUOTING`, `AWAITING_APPROVAL`, `APPROVED`, `ORDERED`, `DELIVERED`, `PAID`.
 

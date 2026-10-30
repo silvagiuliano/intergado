@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
       proxy: {
         '/api/purchases': value('PURCHASES_API_URL', `http://${proxyHost}:${purchasesPort}`),
+        '/api/auth': value('PURCHASES_API_URL', `http://${proxyHost}:${purchasesPort}`),
         '/api/farms': value('PURCHASES_API_URL', `http://${proxyHost}:${purchasesPort}`),
         '/api/analytics': value('ANALYTICS_API_URL', `http://${proxyHost}:${analyticsPort}`),
         '/swagger-ui': value('PURCHASES_API_URL', `http://${proxyHost}:${purchasesPort}`),

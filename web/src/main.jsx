@@ -21,18 +21,94 @@ const Icon = ({ name, size = 20 }) => {
     refresh: <><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.5 9A7 7 0 0 1 18 7l2 5M4 12l2 5a7 7 0 0 0 12.5-2"/></>,
     check: <path d="m4 12 5 5L20 6"/>,
     clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
+    logout: <><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l5-5-5-5M15 12H4"/></>,
     leaf: <><path d="M20 4c-9 0-15 3-15 11a5 5 0 0 0 5 5c8 0 11-6 10-16Z"/><path d="M4 21c3-7 7-10 13-13"/></>,
   }
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
 }
 
+class Unauthorized extends Error {}
+
 async function readJson(url, options) {
   const response = await fetch(url, options)
+  if (response.status === 401) throw new Unauthorized('Sessão expirada. Entre novamente.')
   if (!response.ok) throw new Error(response.status === 400 ? 'Confira os dados informados.' : 'Não foi possível concluir a operação.')
   return response.json()
 }
 
-function App() {
+const postJson = (url, body) => readJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+
+function Root() {
+  const [user, setUser] = useState(undefined)
+  useEffect(() => {
+    readJson('/api/auth/me').then(setUser).catch(() => setUser(null))
+  }, [])
+  async function logout() {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
+    setUser(null)
+  }
+  if (user === undefined) return <div className="login-page"><p className="login-loading">Carregando...</p></div>
+  if (!user) return <Login onLogin={setUser}/>
+  return <App user={user} onLogout={logout} onExpired={() => setUser(null)}/>
+}
+
+function Login({ onLogin }) {
+  const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
+  const [step, setStep] = useState('email')
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function requestCode(event) {
+    event?.preventDefault()
+    setBusy(true); setError('')
+    try {
+      const answer = await postJson('/api/auth/request-code', { email })
+      setMessage(answer.message)
+      setStep('code')
+    } catch (e) { setError(e.message) }
+    finally { setBusy(false) }
+  }
+
+  async function verify(event) {
+    event.preventDefault()
+    setBusy(true); setError('')
+    try { onLogin(await postJson('/api/auth/verify', { email, code })) }
+    catch (e) { setError(e instanceof Unauthorized ? 'Código inválido ou expirado.' : e.message) }
+    finally { setBusy(false) }
+  }
+
+  return <div className="login-page">
+    <div className="modal login-card">
+      <div className="brand login-brand"><span className="brand-mark"><Icon name="leaf" size={23}/></span><span>intergado<small>GESTÃO RURAL</small></span></div>
+      <div className="eyebrow">ACESSO</div>
+      {step === 'email' ? <>
+        <h2>Entrar</h2>
+        <p>Informe seu e-mail. Enviaremos um código de 6 dígitos para confirmar o acesso.</p>
+        <form onSubmit={requestCode}>
+          <label>E-mail<input type="email" required maxLength="254" autoComplete="email" autoFocus value={email} onChange={e => setEmail(e.target.value)} placeholder="nome@empresa.com.br"/></label>
+          {error && <div className="error" role="alert">{error}</div>}
+          <button type="submit" className="primary" disabled={busy}>{busy ? 'Enviando...' : 'Enviar código'}</button>
+        </form>
+      </> : <>
+        <h2>Digite o código</h2>
+        <p>{message} Verifique a caixa de entrada de <strong>{email}</strong>.</p>
+        <form onSubmit={verify}>
+          <label>Código de acesso<input className="login-code" inputMode="numeric" autoComplete="one-time-code" required pattern="\d{6}" maxLength="6" autoFocus value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} placeholder="000000"/></label>
+          {error && <div className="error" role="alert">{error}</div>}
+          <button type="submit" className="primary" disabled={busy}>{busy ? 'Verificando...' : 'Entrar'}</button>
+          <div className="login-links">
+            <button type="button" onClick={() => { setStep('email'); setCode(''); setError('') }}>Trocar e-mail</button>
+            <button type="button" onClick={() => requestCode()} disabled={busy}>Reenviar código</button>
+          </div>
+        </form>
+      </>}
+    </div>
+  </div>
+}
+
+function App({ user, onLogout, onExpired }) {
   const [purchases, setPurchases] = useState([])
   const [farms, setFarms] = useState([])
   const [overview, setOverview] = useState(null)
@@ -51,7 +127,10 @@ function App() {
       setPurchases(items)
       setOverview(metrics)
       setFarms(farmItems)
-    } catch (e) { setError('Serviços indisponíveis. Verifique o ambiente e tente novamente.') }
+    } catch (e) {
+      if (e instanceof Unauthorized) return onExpired()
+      setError('Serviços indisponíveis. Verifique o ambiente e tente novamente.')
+    }
     finally { setLoading(false) }
   }
   useEffect(() => { load() }, [])
@@ -68,10 +147,10 @@ function App() {
     fields.amount = Number(fields.amount)
     setSaving(true)
     try {
-      await readJson('/api/purchases', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields) })
+      await postJson('/api/purchases', fields)
       setShowForm(false)
       await load()
-    } catch (e) { setError(e.message) }
+    } catch (e) { e instanceof Unauthorized ? onExpired() : setError(e.message) }
     finally { setSaving(false) }
   }
 
@@ -79,7 +158,7 @@ function App() {
     try {
       await readJson(`/api/purchases/${id}/status`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) })
       await load()
-    } catch (e) { setError(e.message) }
+    } catch (e) { e instanceof Unauthorized ? onExpired() : setError(e.message) }
   }
 
   const maxDay = Math.max(1, ...(overview?.recentDays || []).map(item => item.count))
@@ -100,7 +179,7 @@ function App() {
     </aside>
 
     <main id="visao" className="content">
-      <header className="topbar"><div className="breadcrumbs">Operação <span>/</span> Fazendas <span>/</span> <strong>Visão geral</strong></div><div className="topbar-right"><span className="live-dot"/> Compras atualizadas ao abrir <button className="refresh" onClick={load} title="Atualizar dados" aria-label="Atualizar dados"><Icon name="refresh" size={17}/></button></div></header>
+      <header className="topbar"><div className="breadcrumbs">Operação <span>/</span> Fazendas <span>/</span> <strong>Visão geral</strong></div><div className="topbar-right"><span className="live-dot"/> Compras atualizadas ao abrir <button className="refresh" onClick={load} title="Atualizar dados" aria-label="Atualizar dados"><Icon name="refresh" size={17}/></button><span className="user-email">{user.email}</span><button className="refresh logout" onClick={onLogout} title="Sair" aria-label="Sair"><Icon name="logout" size={17}/></button></div></header>
       <div className="page">
         <div className="page-heading"><div><div className="eyebrow">INTELIGÊNCIA OPERACIONAL</div><h1>Visão das fazendas</h1><p>Consulte o histórico do rebanho por fazenda e acompanhe as compras da aplicação.</p></div><button className="primary" onClick={() => setShowForm(true)}><Icon name="plus" size={19}/> Nova solicitação</button></div>
         {error && <div className="error" role="alert">{error} <button onClick={load}>Tentar novamente</button></div>}
@@ -142,4 +221,4 @@ function Metric({ label, value, detail, icon, tone, loading }) {
   return <div className="metric"><div className={`metric-icon ${tone}`}><Icon name={icon} size={21}/></div><div className="metric-label">{label}</div><div className="metric-value">{loading ? '—' : value ?? '—'}</div><div className="metric-detail">{detail}</div></div>
 }
 
-createRoot(document.getElementById('root')).render(<App />)
+createRoot(document.getElementById('root')).render(<Root />)

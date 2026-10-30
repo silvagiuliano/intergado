@@ -1,6 +1,6 @@
 # Memória do projeto Intergado
 
-**Atualizada em:** 30/10/2026
+**Atualizada em:** 30/10/2026 (login por e-mail)
 
 **Natureza:** registro do estado observado no repositório e das decisões tomadas durante a construção da demonstração.
 **Ponto de entrada:** [README](../README.md) e [roteiro de avaliação](ROTEIRO_AVALIACAO_APP.md).
@@ -27,16 +27,17 @@ O material de contexto inclui o [resumo executivo](01_Resumo_Executivo_Caso_Augu
 | API de leitura analítica | Quarkus 3.40.1.1, Java 17 e Maven Wrapper. Calcula indicadores a partir das compras. |
 | Persistência | Arquivo SQLite compartilhado pelas duas APIs. O Spring Boot cria tabelas e insere exemplos ausentes na inicialização. |
 | Documentação de API | Swagger/OpenAPI separado para Spring Boot e Quarkus. |
+| Login | Código de 6 dígitos enviado por e-mail via Resend para uma lista de e-mails autorizados. Sessão em cookie `HttpOnly` validada pelo Spring Boot e pelo Quarkus em todas as rotas `/api/*`. |
 | Dados das planilhas | Apenas **quatro saldos históricos resumidos** entram no cadastro inicial. As linhas das planilhas não são importadas automaticamente. |
 
-O frontend consulta três rotas ao abrir ou atualizar a página: `GET /api/farms`, `GET /api/purchases` e `GET /api/analytics/overview`. As chamadas ocorrem em paralelo; se alguma falhar, a interface mostra “Serviços indisponíveis”. O formulário da interface cria compras, e a tabela permite mudar seu status. O Swagger expõe também as operações de cadastro e edição que ainda não têm formulário próprio no React.
+Ao abrir, o frontend consulta `GET /api/auth/me`; sem sessão, mostra a tela de login (e-mail → código). Depois do login, consulta três rotas ao abrir ou atualizar a página: `GET /api/farms`, `GET /api/purchases` e `GET /api/analytics/overview`. As chamadas ocorrem em paralelo; se alguma falhar, a interface mostra “Serviços indisponíveis”. O formulário da interface cria compras, e a tabela permite mudar seu status. Qualquer `401` devolve o usuário à tela de login. O Swagger expõe também as operações de cadastro e edição que ainda não têm formulário próprio no React.
 
 ## 3. Arquitetura e arquivos principais
 
 ```text
 Navegador
   └─ Nginx (Docker, porta 3000) ou Vite (dev, porta 5173)
-       ├─ /api/farms, /api/purchases → Spring Boot :8080 → SQLite
+       ├─ /api/auth, /api/farms, /api/purchases → Spring Boot :8080 → SQLite
        ├─ /api/analytics          → Quarkus :8081     → SQLite
        ├─ /swagger-ui, /v3/api-docs → Swagger Spring Boot
        └─ /q/swagger-ui, /q/openapi → Swagger Quarkus
@@ -50,6 +51,10 @@ Navegador
 | [`web/nginx.conf`](../web/nginx.conf) | Encaminhamento de rotas no contêiner web. |
 | [`services/purchases-api/src/main/java/br/com/intergado/purchases/FarmController.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/FarmController.java) | CRUD parcial de fazendas: criar, listar, consultar e editar. |
 | [`services/purchases-api/src/main/java/br/com/intergado/purchases/PurchaseController.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/PurchaseController.java) | Cadastro, consulta, edição e mudança de status de compras. |
+| [`services/purchases-api/src/main/java/br/com/intergado/purchases/AuthController.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/AuthController.java) | Login: sincroniza a lista de e-mails, gera e valida códigos, cria e encerra sessões. |
+| [`services/purchases-api/src/main/java/br/com/intergado/purchases/AuthFilter.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/AuthFilter.java) | Exige sessão nas rotas `/api/*` do Spring Boot. |
+| [`services/purchases-api/src/main/java/br/com/intergado/purchases/ResendMailer.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/ResendMailer.java) | Envio do código pela API HTTP do Resend; sem chave, registra o código no log. |
+| [`services/analytics-api/src/main/java/br/com/intergado/analytics/AuthFilter.java`](../services/analytics-api/src/main/java/br/com/intergado/analytics/AuthFilter.java) | Valida no Quarkus o mesmo cookie de sessão, consultando o SQLite. |
 | [`services/analytics-api/src/main/java/br/com/intergado/analytics/AnalyticsResource.java`](../services/analytics-api/src/main/java/br/com/intergado/analytics/AnalyticsResource.java) | Agregações de compras para o dashboard. |
 | [`services/purchases-api/src/main/resources/schema.sql`](../services/purchases-api/src/main/resources/schema.sql) | Tabelas, restrições e índices SQLite. |
 | [`services/purchases-api/src/main/resources/data.sql`](../services/purchases-api/src/main/resources/data.sql) | Quatro fazendas e sete compras de exemplo, inseridas com `INSERT OR IGNORE`. |
@@ -81,10 +86,20 @@ Campos: `id`, `title`, `farm`, `category`, `requester`, `supplier`, `amount`, `s
 
 Os status disponíveis são `RECEIVED`, `QUOTING`, `AWAITING_APPROVAL`, `APPROVED`, `ORDERED`, `DELIVERED` e `PAID`. A API analítica conta como “em andamento” todos os registros fora de `DELIVERED` e `PAID`. Ela calcula total, aguardando aprovação, concluídos, valor estimado, valor pago, grupos por status/categoria/fazenda e contagem diária dos últimos sete dias. Os indicadores são de **compras**, não de produtividade ou estoque do gado.
 
+### Autenticação: `users`, `login_codes`, `sessions`
+
+`users` guarda `email` (minúsculo) e `active`. A cada inicialização, o Spring Boot marca como ativos apenas os e-mails de `AUTH_ALLOWED_EMAILS` e apaga as sessões dos demais. `login_codes` guarda o hash SHA-256 de `email:código`, tentativas, validade e uso; `sessions` guarda o hash SHA-256 do token do cookie, o e-mail e a validade. Nem códigos nem tokens ficam em texto puro no banco.
+
+Regras: código de 6 dígitos válido por `AUTH_CODE_MINUTES` (10), no máximo 5 tentativas, uso único; pedir novo código invalida os anteriores, e só um código é gerado a cada 60 segundos por e-mail. O pedido sempre responde `202` com a mesma mensagem, autorizado ou não. Sessões duram `AUTH_SESSION_DAYS` (7). Sessões vencidas e códigos com mais de um dia são apagados a cada login bem-sucedido.
+
 ## 5. APIs e Swagger
 
 | Método | Rota | Serviço | Finalidade |
 | --- | --- | --- | --- |
+| `POST` | `/api/auth/request-code` | Spring Boot | Pedir código (público; sempre `202`). |
+| `POST` | `/api/auth/verify` | Spring Boot | Validar código e criar cookie de sessão (público). |
+| `GET` | `/api/auth/me` | Spring Boot | E-mail da sessão atual. |
+| `POST` | `/api/auth/logout` | Spring Boot | Encerrar sessão (público). |
 | `GET` | `/api/farms` | Spring Boot | Listar fazendas. |
 | `GET` | `/api/farms/{id}` | Spring Boot | Consultar fazenda. |
 | `POST` | `/api/farms` | Spring Boot | Cadastrar fazenda e saldos. |
@@ -95,6 +110,8 @@ Os status disponíveis são `RECEIVED`, `QUOTING`, `AWAITING_APPROVAL`, `APPROVE
 | `PUT` | `/api/purchases/{id}` | Spring Boot | Editar título, fazenda, categoria, solicitante, fornecedor e valor. |
 | `PUT` | `/api/purchases/{id}/status` | Spring Boot | Alterar status. |
 | `GET` | `/api/analytics/overview` | Quarkus | Consultar indicadores agregados. |
+
+Todas as rotas `/api/*`, exceto as três públicas de login, respondem `401` sem sessão válida. O Swagger, o OpenAPI e os health checks continuam públicos; as chamadas feitas pelo Swagger usam o cookie do navegador, então é preciso entrar no painel antes.
 
 Com as portas padrão, o Swagger de cadastros e compras fica em `http://localhost:5173/swagger-ui/index.html` no desenvolvimento ou `http://localhost:3000/swagger-ui/index.html` no Docker. O Swagger de indicadores fica nos mesmos hosts em `/q/swagger-ui`. Os contratos OpenAPI estão em `/v3/api-docs` e `/q/openapi`, respectivamente. As APIs Java também expõem `/actuator/health` e `/q/health/ready` em suas portas internas.
 
@@ -143,6 +160,11 @@ Abra `http://localhost:5173` ou `http://IP_DA_MAQUINA:5173`. Os scripts Java lee
 | `WEB_PORT` | `3000` | Porta publicada pelo Compose para o site. |
 | `PURCHASES_API_URL` | derivada do host/porta | Alvo opcional do proxy Vite para Spring Boot. |
 | `ANALYTICS_API_URL` | derivada do host/porta | Alvo opcional do proxy Vite para Quarkus. |
+| `AUTH_ALLOWED_EMAILS` | vazio | E-mails autorizados, separados por vírgula. Vazio: ninguém entra. |
+| `RESEND_API_KEY` | vazio | Chave do Resend. Vazio: o código só aparece no log do Spring Boot. |
+| `AUTH_EMAIL_FROM` | `Intergado <onboarding@resend.dev>` | Remetente. O endereço de teste do Resend só entrega ao dono da conta. |
+| `AUTH_COOKIE_SECURE` | `false` | `true` em HTTPS. |
+| `AUTH_CODE_MINUTES`, `AUTH_SESSION_DAYS` | `10`, `7` | Validade do código e da sessão. |
 
 ### Docker Compose
 
@@ -162,11 +184,15 @@ Abra `http://localhost:3000`, salvo ajuste em `WEB_PORT`. O volume `sqlite_data`
 | `No plugin found for prefix 'quarckus'` | Erro de digitação: o prefixo correto é `quarkus`. |
 | `BindException: Endereço já em uso` na porta 8080 | Já há outro processo escutando na porta. Conferir com `ss -ltnp` e encerrar a instância duplicada ou mudar `PURCHASES_API_PORT` em `.env`. O mesmo princípio vale para 8081 e 5173. |
 | Dashboard mostra “Serviços indisponíveis” | O React precisa das três respostas. Verificar Spring Boot, Quarkus, proxy e `GET /api/farms`, `/api/purchases`, `/api/analytics/overview`. |
+| Painel volta para o login ou APIs respondem `401` | Sessão ausente, vencida ou e-mail removido de `AUTH_ALLOWED_EMAILS`. Entrar de novo. |
+| Código não chega | Procurar `Falha ao enviar` no log do Spring Boot; conferir `RESEND_API_KEY` e domínio verificado do remetente. Sem chave, o código está no log (`Código de acesso para`). Novo código só após 60 s. |
 | Contagens diferentes de 7 compras e 4 fazendas | O banco persiste entre reinicializações. As inserções iniciais usam `INSERT OR IGNORE`; registros já existentes são preservados. |
 
 As verificações feitas durante a implementação incluíram build das duas APIs e do frontend, respostas `200` para OpenAPI/Swagger via proxy, cadastro e edição de fazenda e compra em **SQLite temporário**, retorno `409` para nome duplicado e atualização do nome da fazenda nas compras associadas. Isso não substitui uma execução de ponta a ponta no ambiente atual; não há indicação de que os serviços estejam ativos neste momento.
 
-**Estado do controle de versão em 30/10/2026:** o histórico Git contém apenas os commits iniciais de documentação; boa parte da aplicação e da documentação gerada aparece como arquivo ainda não rastreado, e `README.md`/`.gitignore` têm alterações locais. Esta memória foi criada como arquivo novo e não foi registrada em commit. Antes de compartilhar ou implantar a aplicação a partir de um clone, revisar `git status` e versionar os arquivos pretendidos. O `.env` e o banco `data/intergado.db` são dados locais e não devem ser incluídos por engano.
+O login foi verificado em 30/10/2026 com os JARs compilados e um SQLite temporário: `401` sem sessão nas duas APIs, `202` idêntico para e-mail autorizado e não autorizado, `400` para e-mail inválido, intervalo de 60 s, código errado/reutilizado e bloqueio após 5 tentativas com `401`, login aceitando e-mail em maiúsculas, cookie `HttpOnly; SameSite=Lax`, acesso às duas APIs com sessão, `401` com token falso e após logout, desativação de e-mail removido da lista e falha do Resend (chave inválida) registrada no log sem deixar código pendente. O envio real por uma conta Resend não foi testado.
+
+**Controle de versão:** a aplicação foi registrada no commit `fe1f439`. O `.env` e o banco `data/intergado.db` são dados locais e não devem ser incluídos por engano.
 
 ## 9. Limitações e próximos passos
 
@@ -174,7 +200,7 @@ As verificações feitas durante a implementação incluíram build das duas API
 2. **Modelo canônico:** relacionar compras à fazenda por identificador, cadastrar pastos/produtos/unidades e definir regras de mudança de nome. O vínculo atual usa texto.
 3. **Dashboards rurais reais:** histórico de movimentos, manejo, ração e insumos só devem ser publicados após as regras de negócio e qualidade de dados acima.
 4. **Interface de administração:** o React cadastra compras e altera status; cadastro/edição de fazendas e edição completa de compras são feitos pelo Swagger/API.
-5. **Operação para múltiplos usuários:** adicionar autenticação, autorização, HTTPS, backup, migrações de schema e testes de integração; avaliar PostgreSQL quando a demonstração evoluir para uso compartilhado.
+5. **Operação para múltiplos usuários:** o login por e-mail existe, mas todos os usuários autorizados têm o mesmo acesso. Faltam perfis/permissões, cadastro de usuários pela interface, limite de pedidos por IP, HTTPS, backup, migrações de schema e testes de integração; avaliar PostgreSQL quando a demonstração evoluir para uso compartilhado.
 6. **Integrações propostas:** WhatsApp, IA, OpenSearch, fornecedores e Realtec constam da documentação de oportunidades, mas não estão implementados.
 
 As dúvidas de negócio que bloqueiam indicadores mais fortes estão listadas no fim de [AVALIACAO_PLANILHAS_DASHBOARDS.md](AVALIACAO_PLANILHAS_DASHBOARDS.md): confirmação de eventos realizados, definição do rendimento da ração, significado das diferenças de saldos, unidades dos produtos e identificadores oficiais de pastos/módulos.
@@ -188,5 +214,6 @@ As dúvidas de negócio que bloqueiam indicadores mais fortes estão listadas no
 5. Avaliar as quatro planilhas, identificar as quatro fazendas e exibir seus saldos históricos de forma separada.
 6. Mover o resumo de fazendas para a API/SQLite, permitir escrita por API e adicionar Swagger aos dois serviços.
 7. Registrar arquitetura e sequência em Mermaid e SVG.
+8. Adicionar login sem senha: código de 6 dígitos enviado via Resend, lista de e-mails autorizados por variável de ambiente e todas as rotas `/api/*` protegidas nas duas APIs (sem Spring Security; filtro próprio e sessão no SQLite).
 
 Este arquivo é um retrato do projeto, não uma fonte alternativa de dados operacionais. Ao alterar APIs, modelo, configuração ou importação, atualize também esta memória, o [README](../README.md), o [roteiro](ROTEIRO_AVALIACAO_APP.md) e os diagramas afetados.
