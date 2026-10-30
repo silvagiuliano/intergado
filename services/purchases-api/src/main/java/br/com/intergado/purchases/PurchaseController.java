@@ -29,9 +29,11 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/purchases")
 public class PurchaseController {
     private final JdbcTemplate jdbc;
+    private final WhatsAppNotifier whatsApp;
 
-    public PurchaseController(JdbcTemplate jdbc) {
+    public PurchaseController(JdbcTemplate jdbc, WhatsAppNotifier whatsApp) {
         this.jdbc = jdbc;
+        this.whatsApp = whatsApp;
     }
 
     public enum Status { RECEIVED, QUOTING, AWAITING_APPROVAL, APPROVED, ORDERED, DELIVERED, PAID }
@@ -82,10 +84,13 @@ public class PurchaseController {
 
     @PutMapping("/{id}/status")
     public Purchase updateStatus(@PathVariable long id, @Valid @RequestBody StatusChange input) {
+        Status previous = get(id).status();
         int changed = jdbc.update("UPDATE purchase_requests SET status = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
             input.status().name(), id);
         if (changed == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Solicitação não encontrada");
-        return get(id);
+        Purchase purchase = get(id);
+        if (previous != purchase.status()) whatsApp.statusChanged(purchase, previous);
+        return purchase;
     }
 
     @PutMapping("/{id}")

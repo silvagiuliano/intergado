@@ -14,11 +14,11 @@ public class ResendMailer {
     private static final Logger log = LoggerFactory.getLogger(ResendMailer.class);
     private final RestClient client = RestClient.create("https://api.resend.com");
     private final String apiKey;
-    private final String from;
+    private final IntegrationSettings settings;
 
-    public ResendMailer(@Value("${app.resend.api-key}") String apiKey, @Value("${app.resend.from}") String from) {
+    public ResendMailer(@Value("${app.resend.api-key}") String apiKey, IntegrationSettings settings) {
         this.apiKey = apiKey.trim();
-        this.from = from;
+        this.settings = settings;
         if (this.apiKey.isEmpty()) {
             log.warn("RESEND_API_KEY não configurada: os códigos de acesso serão apenas registrados no log.");
         }
@@ -39,7 +39,7 @@ public class ResendMailer {
         client.post().uri("/emails")
             .header("Authorization", "Bearer " + apiKey)
             .contentType(MediaType.APPLICATION_JSON)
-            .body(Map.of("from", from, "to", List.of(email), "subject", "Código de acesso: " + code,
+            .body(Map.of("from", settings.get("resend", "from"), "to", List.of(email), "subject", "Código de acesso: " + code,
                 "text", text, "html", html))
             .retrieve()
             .toBodilessEntity();

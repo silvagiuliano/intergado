@@ -1,0 +1,70 @@
+# Evolution API (WhatsApp) para testes. Usa o mesmo .env da raiz.
+#
+# Junto com a aplicação (o Spring Boot alcança o Evolution pela rede do Compose):
+#   docker compose -f compose.yaml -f compose.evolution.yaml up -d
+# Só o Evolution, para usar com os scripts dev-*.sh:
+#   docker compose -f compose.evolution.yaml up -d
+#
+# A API e o painel /manager ficam em http://127.0.0.1:${EVOLUTION_PORT:-8090}.
+services:
+  evolution-api:
+    image: evoapicloud/evolution-api:v2.3.7
+    restart: unless-stopped
+    ports:
+      - "${EVOLUTION_LISTEN_HOST:-127.0.0.1}:${EVOLUTION_PORT:-8090}:8080"
+    environment:
+      SERVER_URL: http://localhost:${EVOLUTION_PORT:-8090}
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?Defina EVOLUTION_API_KEY no .env}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "false"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_POSTGRES_PASSWORD:-evolution}@evolution-postgres:5432/evolution?schema=evolution_api
+      DATABASE_CONNECTION_CLIENT_NAME: intergado
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://evolution-redis:6379/6
+      CACHE_REDIS_PREFIX_KEY: evolution
+      CACHE_LOCAL_ENABLED: "false"
+      CONFIG_SESSION_PHONE_CLIENT: Intergado
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      DEL_INSTANCE: "false"
+      LANGUAGE: pt-BR
+      LOG_LEVEL: ERROR,WARN,INFO
+      TELEMETRY_ENABLED: "false"
+    volumes:
+      - evolution_instances:/evolution/instances
+    depends_on:
+      evolution-postgres:
+        condition: service_healthy
+      evolution-redis:
+        condition: service_healthy
+
+  evolution-postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: evolution
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: ${EVOLUTION_POSTGRES_PASSWORD:-evolution}
+    volumes:
+      - evolution_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  evolution-redis:
+    image: redis:7
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - evolution_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  evolution_instances:
+  evolution_postgres:
+  evolution_redis:

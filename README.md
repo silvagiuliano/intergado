@@ -17,9 +17,22 @@ Veja também os [diagramas de arquitetura e sequência](docs/DIAGRAMAS_ARQUITETU
 | `analytics-api` | Java 17 + Quarkus 3 + Maven | Indicadores agregados e Swagger de consultas |
 | `sqlite_data` | Arquivo SQLite em volume Docker | Persistência compartilhada entre os serviços |
 
-O Nginx encaminha `/api/auth`, `/api/farms` e `/api/purchases` ao Spring Boot e `/api/analytics` ao Quarkus. Os serviços Java usam o mesmo arquivo; o Spring Boot cria as tabelas e os dados de demonstração antes de o Quarkus iniciar. Não é necessário instalar ou executar um servidor de banco de dados. Os dados iniciais são **apenas exemplos**, identificados no banco e no painel.
+O Nginx encaminha `/api/auth`, `/api/integrations`, `/api/farms` e `/api/purchases` ao Spring Boot e `/api/analytics` ao Quarkus. Os serviços Java usam o mesmo arquivo; o Spring Boot cria as tabelas e os dados de demonstração antes de o Quarkus iniciar. Não é necessário instalar ou executar um servidor de banco de dados. Os dados iniciais são **apenas exemplos**, identificados no banco e no painel.
 
 O bloco **Fazendas** consulta `GET /api/farms`. A base nova contém Santa Cruz, Ilha Verde, Novo Mundo e Campo Verde, com o último saldo datado e o saldo Adepará de cada aba de `docs/planilhas/01_Controle_gado.xlsx`. Os registros iniciais são de 2021 e podem ser editados pela API. Ainda não há importação automática de todas as linhas das planilhas. As compras demonstrativas são independentes desses saldos. Em bases SQLite antigas, exemplos com a fazenda fictícia `Boa Vista` permanecem intactos; novas bases usam os nomes das quatro fazendas nos exemplos.
+
+## Integrações e WhatsApp (testes)
+
+A tela **Integrações**, no menu lateral do painel, mostra e edita os dados dos serviços externos: o WhatsApp pelo [Evolution API](docs/EVOLUTION_API.md) e o remetente do Resend. O valor salvo na tela tem prioridade sobre o `.env`; chaves e senhas ficam só no `.env`.
+
+O Evolution API roda em um Compose separado, só para testes:
+
+```bash
+docker compose -f compose.yaml -f compose.evolution.yaml up -d   # aplicação + Evolution
+docker compose -f compose.evolution.yaml up -d                   # só o Evolution, para os scripts dev-*.sh
+```
+
+Defina `EVOLUTION_API_KEY` no `.env` antes. O passo a passo de pareamento e teste está em [docs/EVOLUTION_API.md](docs/EVOLUTION_API.md). As mensagens só vão para os números de teste cadastrados.
 
 ## Iniciar com Docker
 
@@ -82,7 +95,7 @@ Os scripts criam `data/` e leem `.env` da raiz. Você pode alterar os endereços
 | `ANALYTICS_API_PORT` | `8081` | Porta do Quarkus em dev |
 | `WEB_PORT` | `3000` | Porta do site em Docker Compose |
 
-O Vite redireciona `/api/auth`, `/api/farms`, `/api/purchases` e `/api/analytics` para as portas configuradas. Se as APIs estiverem em outra máquina, defina também `PURCHASES_API_URL` e `ANALYTICS_API_URL` em `.env`. Para acessar pela rede, abra `http://IP_DA_MAQUINA:5173`. Ambos os serviços Java usam `data/intergado.db` por padrão, relativo à raiz do projeto. Em Docker, o arquivo fica no volume `sqlite_data`.
+O Vite redireciona `/api/auth`, `/api/integrations`, `/api/farms`, `/api/purchases` e `/api/analytics` para as portas configuradas. Se as APIs estiverem em outra máquina, defina também `PURCHASES_API_URL` e `ANALYTICS_API_URL` em `.env`. Para acessar pela rede, abra `http://IP_DA_MAQUINA:5173`. Ambos os serviços Java usam `data/intergado.db` por padrão, relativo à raiz do projeto. Em Docker, o arquivo fica no volume `sqlite_data`.
 
 Se o painel mostrar **“Serviços indisponíveis”**, confirme que os dois serviços estão ativos: `curl http://127.0.0.1:8080/actuator/health` e `curl http://127.0.0.1:8081/q/health/ready` (ajuste as portas se as alterou).
 
@@ -105,6 +118,9 @@ O Quarkus exige Maven 3.9 ou superior. `./dev-quarkus.sh` usa o Maven Wrapper do
 | GET | `/api/farms/{id}` | Detalhe de uma fazenda |
 | POST | `/api/farms` | Cadastra fazenda, data, saldos e fontes |
 | PUT | `/api/farms/{id}` | Edita a fazenda; ao renomeá-la, atualiza o nome nas compras associadas |
+| GET | `/api/integrations` | Configuração das integrações (Evolution, Resend) |
+| PUT | `/api/integrations/{chave}` | Salva campos de uma integração |
+| GET/POST | `/api/integrations/evolution/...` | `connection`, `connect`, `logout` e `test` do WhatsApp |
 | GET | `/api/analytics/overview` | Totais, valores e séries para o dashboard |
 | GET | `/actuator/health` | Saúde do Spring Boot |
 | GET | `/q/health/ready` | Prontidão do Quarkus |

@@ -16,20 +16,31 @@ flowchart LR
         A["API de indicadores<br/>Quarkus / Java<br/>porta 8081"]
         DB[("SQLite<br/>volume sqlite_data")]
 
-        W -->|"/api/auth, /api/farms e /api/purchases<br/>/swagger-ui e /v3/api-docs"| P
+        W -->|"/api/auth, /api/integrations,<br/>/api/farms e /api/purchases<br/>/swagger-ui e /v3/api-docs"| P
         W -->|"/api/analytics<br/>/q/swagger-ui e /q/openapi"| A
-        P -->|"cadastros, códigos e sessões"| DB
+        P -->|"cadastros, códigos, sessões<br/>e integration_settings"| DB
         A -->|"valida sessão, consulta e agrega"| DB
     end
 
     P -->|"HTTPS: código de acesso<br/>RESEND_API_KEY"| R["Resend<br/>envio de e-mail"]
     R -.->|"e-mail com código de 6 dígitos"| U
 
+    subgraph Evo["compose.evolution.yaml (testes)"]
+        EV["Evolution API 2.3.7<br/>porta 8090"]
+        EVDB[("PostgreSQL + Redis<br/>do Evolution")]
+        EV --> EVDB
+    end
+
+    P -->|"HTTP apikey: status de compra<br/>e mensagem de teste"| EV
+    EV -.->|"WhatsApp só para<br/>números de teste"| WA["Celulares de teste"]
+
     XLSX["Planilhas em docs/planilhas"] -.->|"resumo histórico extraído na preparação dos dados"| SEED["schema.sql + data.sql"]
     SEED -.->|"inicialização do SQLite"| P
 ```
 
-As APIs compartilham o mesmo arquivo SQLite. O Spring Boot cria as tabelas e os registros iniciais, gera os códigos de acesso e as sessões; o Quarkus lê os dados para calcular indicadores. As duas APIs validam o cookie `intergado_session` contra a tabela `sessions` em todas as rotas `/api/*`, exceto as de login. O Spring Boot é o único serviço que chama o Resend; sem `RESEND_API_KEY`, o código vai apenas para o log. Os quatro saldos de fazendas cadastrados inicialmente são históricos, de 2021. As planilhas XLSX **não são importadas automaticamente** a cada execução.
+As APIs compartilham o mesmo arquivo SQLite. O Spring Boot cria as tabelas e os registros iniciais, gera os códigos de acesso e as sessões; o Quarkus lê os dados para calcular indicadores. As duas APIs validam o cookie `intergado_session` contra a tabela `sessions` em todas as rotas `/api/*`, exceto as de login. O Spring Boot é o único serviço que chama o Resend; sem `RESEND_API_KEY`, o código vai apenas para o log.
+
+O Evolution API roda em um Compose à parte, só para testes. Quando os dois arquivos sobem juntos, o Spring Boot o alcança por `http://evolution-api:8080`; nos scripts de desenvolvimento, por `EVOLUTION_API_URL`. Os dados editáveis das integrações vêm da tela **Integrações** (`integration_settings`) e, na falta deles, do `.env`. Detalhes em [EVOLUTION_API.md](EVOLUTION_API.md). Os quatro saldos de fazendas cadastrados inicialmente são históricos, de 2021. As planilhas XLSX **não são importadas automaticamente** a cada execução.
 
 ## Sequência: login, abrir o painel e criar uma solicitação
 

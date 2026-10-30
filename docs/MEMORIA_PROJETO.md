@@ -28,6 +28,8 @@ O material de contexto inclui o [resumo executivo](01_Resumo_Executivo_Caso_Augu
 | Persistência | Arquivo SQLite compartilhado pelas duas APIs. O Spring Boot cria tabelas e insere exemplos ausentes na inicialização. |
 | Documentação de API | Swagger/OpenAPI separado para Spring Boot e Quarkus. |
 | Login | Código de 6 dígitos enviado por e-mail via Resend para uma lista de e-mails autorizados. Sessão em cookie `HttpOnly` validada pelo Spring Boot e pelo Quarkus em todas as rotas `/api/*`. |
+| Integrações | Tela **Integrações** (React, `#integracoes`) e API `/api/integrations` para Evolution API (WhatsApp, fase de testes) e Resend. Valores da tela ficam em `integration_settings` e têm prioridade sobre o `.env`; segredos ficam só no `.env`. |
+| WhatsApp | Evolution API 2.3.7 em `compose.evolution.yaml`. Mensagem de teste e aviso automático de mudança de status, **apenas para números de teste**. Detalhes em [EVOLUTION_API.md](EVOLUTION_API.md). |
 | Dados das planilhas | Apenas **quatro saldos históricos resumidos** entram no cadastro inicial. As linhas das planilhas não são importadas automaticamente. |
 
 Ao abrir, o frontend consulta `GET /api/auth/me`; sem sessão, mostra a tela de login (e-mail → código). Depois do login, consulta três rotas ao abrir ou atualizar a página: `GET /api/farms`, `GET /api/purchases` e `GET /api/analytics/overview`. As chamadas ocorrem em paralelo; se alguma falhar, a interface mostra “Serviços indisponíveis”. O formulário da interface cria compras, e a tabela permite mudar seu status. Qualquer `401` devolve o usuário à tela de login. O Swagger expõe também as operações de cadastro e edição que ainda não têm formulário próprio no React.
@@ -37,7 +39,8 @@ Ao abrir, o frontend consulta `GET /api/auth/me`; sem sessão, mostra a tela de 
 ```text
 Navegador
   └─ Nginx (Docker, porta 3000) ou Vite (dev, porta 5173)
-       ├─ /api/auth, /api/farms, /api/purchases → Spring Boot :8080 → SQLite
+       ├─ /api/auth, /api/integrations, /api/farms, /api/purchases → Spring Boot :8080 → SQLite
+       │                                    └─ Evolution API :8090 (compose.evolution.yaml) → WhatsApp
        ├─ /api/analytics          → Quarkus :8081     → SQLite
        ├─ /swagger-ui, /v3/api-docs → Swagger Spring Boot
        └─ /q/swagger-ui, /q/openapi → Swagger Quarkus
@@ -54,6 +57,10 @@ Navegador
 | [`services/purchases-api/src/main/java/br/com/intergado/purchases/AuthController.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/AuthController.java) | Login: sincroniza a lista de e-mails, gera e valida códigos, cria e encerra sessões. |
 | [`services/purchases-api/src/main/java/br/com/intergado/purchases/AuthFilter.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/AuthFilter.java) | Exige sessão nas rotas `/api/*` do Spring Boot. |
 | [`services/purchases-api/src/main/java/br/com/intergado/purchases/ResendMailer.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/ResendMailer.java) | Envio do código pela API HTTP do Resend; sem chave, registra o código no log. |
+| [`services/purchases-api/src/main/java/br/com/intergado/purchases/IntegrationSettings.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/IntegrationSettings.java) | Definição dos campos de cada integração, validação e leitura tela > `.env` > padrão. |
+| [`services/purchases-api/src/main/java/br/com/intergado/purchases/IntegrationController.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/IntegrationController.java) | Rotas `/api/integrations` e ações do Evolution (estado, conectar, desconectar, teste). |
+| [`services/purchases-api/src/main/java/br/com/intergado/purchases/EvolutionClient.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/EvolutionClient.java), [`WhatsAppNotifier.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/WhatsAppNotifier.java) | Chamadas HTTP ao Evolution e envio aos números de teste (em segundo plano na mudança de status). |
+| [`compose.evolution.yaml`](../compose.evolution.yaml) | Evolution API, PostgreSQL e Redis próprios, apenas para testes. |
 | [`services/analytics-api/src/main/java/br/com/intergado/analytics/AuthFilter.java`](../services/analytics-api/src/main/java/br/com/intergado/analytics/AuthFilter.java) | Valida no Quarkus o mesmo cookie de sessão, consultando o SQLite. |
 | [`services/analytics-api/src/main/java/br/com/intergado/analytics/AnalyticsResource.java`](../services/analytics-api/src/main/java/br/com/intergado/analytics/AnalyticsResource.java) | Agregações de compras para o dashboard. |
 | [`services/purchases-api/src/main/resources/schema.sql`](../services/purchases-api/src/main/resources/schema.sql) | Tabelas, restrições e índices SQLite. |
@@ -92,6 +99,10 @@ Os status disponíveis são `RECEIVED`, `QUOTING`, `AWAITING_APPROVAL`, `APPROVE
 
 Regras: código de 6 dígitos válido por `AUTH_CODE_MINUTES` (10), no máximo 5 tentativas, uso único; pedir novo código invalida os anteriores, e só um código é gerado a cada 60 segundos por e-mail. O pedido sempre responde `202` com a mesma mensagem, autorizado ou não. Sessões duram `AUTH_SESSION_DAYS` (7). Sessões vencidas e códigos com mais de um dia são apagados a cada login bem-sucedido.
 
+### `integration_settings`
+
+Chave `(integration, name)`, `value`, `updated_at` e `updated_by` (e-mail da sessão). Só guarda valores alterados na tela; ao salvar um campo vazio, a linha é apagada e volta a valer o `.env`. Os campos possíveis são definidos em `IntegrationSettings.DEFINITIONS`; para um novo integrador, acrescente uma definição ali.
+
 ## 5. APIs e Swagger
 
 | Método | Rota | Serviço | Finalidade |
@@ -100,6 +111,9 @@ Regras: código de 6 dígitos válido por `AUTH_CODE_MINUTES` (10), no máximo 5
 | `POST` | `/api/auth/verify` | Spring Boot | Validar código e criar cookie de sessão (público). |
 | `GET` | `/api/auth/me` | Spring Boot | E-mail da sessão atual. |
 | `POST` | `/api/auth/logout` | Spring Boot | Encerrar sessão (público). |
+| `GET` | `/api/integrations` | Spring Boot | Configuração das integrações. |
+| `PUT` | `/api/integrations/{chave}` | Spring Boot | Salvar campos de uma integração. |
+| `GET`, `POST` | `/api/integrations/evolution/{connection,connect,logout,test}` | Spring Boot | Estado, pareamento, desconexão e teste do WhatsApp. |
 | `GET` | `/api/farms` | Spring Boot | Listar fazendas. |
 | `GET` | `/api/farms/{id}` | Spring Boot | Consultar fazenda. |
 | `POST` | `/api/farms` | Spring Boot | Cadastrar fazenda e saldos. |
@@ -165,6 +179,7 @@ Abra `http://localhost:5173` ou `http://IP_DA_MAQUINA:5173`. Os scripts Java lee
 | `AUTH_EMAIL_FROM` | `Intergado <onboarding@resend.dev>` | Remetente. O endereço de teste do Resend só entrega ao dono da conta. |
 | `AUTH_COOKIE_SECURE` | `false` | `true` em HTTPS. |
 | `AUTH_CODE_MINUTES`, `AUTH_SESSION_DAYS` | `10`, `7` | Validade do código e da sessão. |
+| `EVOLUTION_*`, `WHATSAPP_*` | ver [EVOLUTION_API.md](EVOLUTION_API.md#variáveis) | Evolution API e WhatsApp; parte delas também editável na tela Integrações. |
 
 ### Docker Compose
 
@@ -186,6 +201,7 @@ Abra `http://localhost:3000`, salvo ajuste em `WEB_PORT`. O volume `sqlite_data`
 | Dashboard mostra “Serviços indisponíveis” | O React precisa das três respostas. Verificar Spring Boot, Quarkus, proxy e `GET /api/farms`, `/api/purchases`, `/api/analytics/overview`. |
 | Painel volta para o login ou APIs respondem `401` | Sessão ausente, vencida ou e-mail removido de `AUTH_ALLOWED_EMAILS`. Entrar de novo. |
 | Código não chega | Procurar `Falha ao enviar` no log do Spring Boot; conferir `RESEND_API_KEY` e domínio verificado do remetente. Sem chave, o código está no log (`Código de acesso para`). Novo código só após 60 s. |
+| WhatsApp: “não conectado” ou “Evolution API não respondeu” | Parear em Integrações → Conectar; conferir se `compose.evolution.yaml` está ativo e se `EVOLUTION_API_KEY` é a mesma nos dois lados. Ver [EVOLUTION_API.md](EVOLUTION_API.md#comportamento-e-diagnóstico). |
 | Contagens diferentes de 7 compras e 4 fazendas | O banco persiste entre reinicializações. As inserções iniciais usam `INSERT OR IGNORE`; registros já existentes são preservados. |
 
 As verificações feitas durante a implementação incluíram build das duas APIs e do frontend, respostas `200` para OpenAPI/Swagger via proxy, cadastro e edição de fazenda e compra em **SQLite temporário**, retorno `409` para nome duplicado e atualização do nome da fazenda nas compras associadas. Isso não substitui uma execução de ponta a ponta no ambiente atual; não há indicação de que os serviços estejam ativos neste momento.
@@ -201,7 +217,8 @@ O login foi verificado em 30/10/2026 com os JARs compilados e um SQLite temporá
 3. **Dashboards rurais reais:** histórico de movimentos, manejo, ração e insumos só devem ser publicados após as regras de negócio e qualidade de dados acima.
 4. **Interface de administração:** o React cadastra compras e altera status; cadastro/edição de fazendas e edição completa de compras são feitos pelo Swagger/API.
 5. **Operação para múltiplos usuários:** o login por e-mail existe, mas todos os usuários autorizados têm o mesmo acesso. Faltam perfis/permissões, cadastro de usuários pela interface, limite de pedidos por IP, HTTPS, backup, migrações de schema e testes de integração; avaliar PostgreSQL quando a demonstração evoluir para uso compartilhado.
-6. **Integrações propostas:** WhatsApp, IA, OpenSearch, fornecedores e Realtec constam da documentação de oportunidades, mas não estão implementados.
+6. **Integrações propostas:** o WhatsApp tem só a Fase 1 (envio de teste via Evolution API). Recebimento de mensagens, IA, OpenSearch, fornecedores e Realtec constam da documentação de oportunidades, mas não estão implementados.
+7. **Tela Integrações:** qualquer usuário logado pode alterá-la; falta perfil de administrador e histórico de alterações (só o último `updated_by` fica gravado).
 
 As dúvidas de negócio que bloqueiam indicadores mais fortes estão listadas no fim de [AVALIACAO_PLANILHAS_DASHBOARDS.md](AVALIACAO_PLANILHAS_DASHBOARDS.md): confirmação de eventos realizados, definição do rendimento da ração, significado das diferenças de saldos, unidades dos produtos e identificadores oficiais de pastos/módulos.
 
@@ -215,5 +232,6 @@ As dúvidas de negócio que bloqueiam indicadores mais fortes estão listadas no
 6. Mover o resumo de fazendas para a API/SQLite, permitir escrita por API e adicionar Swagger aos dois serviços.
 7. Registrar arquitetura e sequência em Mermaid e SVG.
 8. Adicionar login sem senha: código de 6 dígitos enviado via Resend, lista de e-mails autorizados por variável de ambiente e todas as rotas `/api/*` protegidas nas duas APIs (sem Spring Security; filtro próprio e sessão no SQLite).
+9. Fase 1 do WhatsApp: Evolution API 2.3.7 em Compose separado, tela **Integrações** para cadastrar dados dos integradores (valor da tela > `.env` > padrão, segredos só no `.env`), mensagens apenas para números de teste.
 
 Este arquivo é um retrato do projeto, não uma fonte alternativa de dados operacionais. Ao alterar APIs, modelo, configuração ou importação, atualize também esta memória, o [README](../README.md), o [roteiro](ROTEIRO_AVALIACAO_APP.md) e os diagramas afetados.

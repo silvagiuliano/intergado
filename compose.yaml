@@ -9,6 +9,14 @@ services:
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       AUTH_EMAIL_FROM: ${AUTH_EMAIL_FROM:-Intergado <onboarding@resend.dev>}
+      # Evolution API: só responde quando compose.evolution.yaml também está ativo
+      EVOLUTION_API_URL: http://evolution-api:8080
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
+      EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE:-intergado}
+      EVOLUTION_INSTANCE_NUMBER: ${EVOLUTION_INSTANCE_NUMBER:-}
+      WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
+      WHATSAPP_TEST_NUMBERS: ${WHATSAPP_TEST_NUMBERS:-}
+      WHATSAPP_NOTIFY_STATUSES: ${WHATSAPP_NOTIFY_STATUSES:-}
     volumes:
       - sqlite_data:/data
     healthcheck:

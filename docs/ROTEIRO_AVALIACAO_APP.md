@@ -63,7 +63,11 @@ curl --noproxy '*' -fsS -b /tmp/intergado.cookies http://localhost:3000/api/anal
 
 No navegador, faça login no painel antes de usar o Swagger: ele aproveita o mesmo cookie. Abra `http://localhost:3000/swagger-ui/index.html` para cadastrar ou editar fazendas e compras. Abra `http://localhost:3000/q/swagger-ui` para consultar a documentação da API de indicadores. As APIs Java ficam atrás do Nginx, por isso essas URLs usam a mesma porta 3000 do site. Para testar uma edição sem criar dados extras, consulte primeiro o ID da fazenda e envie todos os campos no `PUT /api/farms/{id}`.
 
-## 6. Diagnosticar problemas
+## 6. Integrações e WhatsApp (opcional)
+
+Abra **Integrações** no menu lateral. Confira a origem de cada valor (salvo na tela, do `.env` ou padrão), altere um campo e salve. Para testar o envio pelo WhatsApp, suba também o Evolution API e siga o passo a passo em [EVOLUTION_API.md](EVOLUTION_API.md#como-testar).
+
+## 7. Diagnosticar problemas
 
 ```bash
 docker compose ps
@@ -76,7 +80,7 @@ docker compose logs --tail=100 purchases-api analytics-api web
 - **Tela abre sem dados:** confira os logs de `purchases-api` e `analytics-api`.
 - **Dados iniciais não batem:** o volume SQLite persiste entre reinicializações. Verifique se já houve cadastros anteriores.
 
-## 7. Parar e reiniciar
+## 8. Parar e reiniciar
 
 ```bash
 docker compose down
@@ -89,4 +93,4 @@ Esses comandos mantêm os dados. **Não use `docker compose down -v` se quiser p
 
 Observe clareza dos indicadores, nomes das categorias e status, facilidade de localizar uma compra, dados necessários no cadastro e fluxo real de aprovação da fazenda. Registre também quais campos precisam identificar fazenda, pasto, produto e responsável para integrar futuramente as planilhas.
 
-WhatsApp, IA, OpenSearch, Realtec, perfis de permissão e a importação completa das planilhas não fazem parte desta versão inicial.
+IA, OpenSearch, Realtec, perfis de permissão, recebimento de mensagens de WhatsApp e a importação completa das planilhas não fazem parte desta versão. O WhatsApp tem apenas envio de teste pelo Evolution API.

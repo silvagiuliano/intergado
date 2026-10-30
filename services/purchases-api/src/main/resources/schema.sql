@@ -53,3 +53,12 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_email ON sessions(email);
+
+CREATE TABLE IF NOT EXISTS integration_settings (
+  integration TEXT NOT NULL,
+  name TEXT NOT NULL,
+  value TEXT NOT NULL CHECK (length(value) <= 2000),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_by TEXT,
+  PRIMARY KEY (integration, name)
+);
