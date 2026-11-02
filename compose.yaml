@@ -1,6 +1,7 @@
 services:
   purchases-api:
     build: ./services/purchases-api
+    restart: unless-stopped
     environment:
       DB_URL: jdbc:sqlite:/data/intergado.db
       AUTH_ALLOWED_EMAILS: ${AUTH_ALLOWED_EMAILS:-}
@@ -28,6 +29,7 @@ services:
 
   analytics-api:
     build: ./services/analytics-api
+    restart: unless-stopped
     environment:
       DB_PATH: /data/intergado.db
     volumes:
@@ -43,33 +45,41 @@ services:
 
   web:
     build: ./web
+    restart: unless-stopped
+    # Só no loopback, para o Caddy do host encaminhar o site (caddy/host/intergado.caddy.template).
     ports:
-      - "${APP_LISTEN_HOST:-0.0.0.0}:${WEB_PORT:-3000}:80"
+      - "127.0.0.1:${WEB_PORT:-3000}:80"
     depends_on:
       purchases-api:
         condition: service_healthy
       analytics-api:
         condition: service_healthy
 
-  # HTTPS na frente do Nginx. Configuração em Caddyfile e nas variáveis CADDY_* do .env.
+  # Caddy próprio do projeto, só no profile standalone (COMPOSE_PROFILES=standalone no .env).
+  # Padrão: Caddy geral do host com o site gerado por scripts/install-host-caddy.sh.
   caddy:
-    image: caddy:2.11.7-alpine
+    image: caddy:2-alpine
+    profiles: ["standalone"]
     restart: unless-stopped
-    ports:
-      - "${CADDY_LISTEN_HOST:-0.0.0.0}:${CADDY_HTTP_PORT:-80}:${CADDY_HTTP_PORT:-80}"
-      - "${CADDY_LISTEN_HOST:-0.0.0.0}:${CADDY_HTTPS_PORT:-443}:${CADDY_HTTPS_PORT:-443}"
-      - "${CADDY_LISTEN_HOST:-0.0.0.0}:${CADDY_HTTPS_PORT:-443}:${CADDY_HTTPS_PORT:-443}/udp"
-    environment:
-      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:-localhost}
-      CADDY_TLS: ${CADDY_TLS:-auto}
-      CADDY_HTTP_PORT: ${CADDY_HTTP_PORT:-80}
-      CADDY_HTTPS_PORT: ${CADDY_HTTPS_PORT:-443}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
     depends_on:
       - web
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN:-localhost}
+    ports:
+      - "0.0.0.0:${CADDY_HTTP_PORT:-80}:80"
+      - "0.0.0.0:${CADDY_HTTPS_PORT:-443}:443"
+      - "0.0.0.0:${CADDY_HTTPS_PORT:-443}:443/udp"
+    volumes:
+      # Padrão: HTTPS automático para CADDY_DOMAIN. Use ./caddy/Caddyfile.local para HTTP sem TLS.
+      - ${CADDYFILE:-./caddy/Caddyfile}:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/caddy-health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
 
 volumes:
   sqlite_data:

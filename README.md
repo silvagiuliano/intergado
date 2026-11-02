@@ -18,7 +18,7 @@ Para publicar em um servidor com HTTPS, siga o [guia de deploy](docs/DEPLOY.md).
 | `purchases-api` | Java 17 + Spring Boot 4 + Maven | API de fazendas e solicitações; inicialização do SQLite; Swagger de cadastros |
 | `analytics-api` | Java 17 + Quarkus 3 + Maven | Indicadores agregados e Swagger de consultas |
 | `sqlite_data` | Arquivo SQLite em volume Docker | Persistência compartilhada entre os serviços |
-| `caddy` | Caddy 2.11 | HTTPS na frente do Nginx, com certificado automático e redirecionamento de HTTP |
+| Caddy | Caddy geral do host (ou o serviço `caddy` do profile `standalone`) | HTTPS na frente do Nginx, com certificado automático e redirecionamento de HTTP |
 
 O Nginx encaminha `/api/auth`, `/api/integrations`, `/api/farms` e `/api/purchases` ao Spring Boot e `/api/analytics` ao Quarkus. Os serviços Java usam o mesmo arquivo; o Spring Boot cria as tabelas e os dados de demonstração antes de o Quarkus iniciar. Não é necessário instalar ou executar um servidor de banco de dados. Os dados iniciais são **apenas exemplos**, identificados no banco e no painel.
 
@@ -46,7 +46,7 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
-Abra **http://localhost:3000**. `APP_LISTEN_HOST` e `WEB_PORT` em `.env` controlam o endereço e a porta publicados pelo Docker Compose. Para ver logs: `docker compose logs -f`. Para parar: `docker compose down`. O arquivo SQLite persiste no volume `sqlite_data`; `docker compose down -v` também remove os dados.
+Abra **http://localhost:3000** na própria máquina: o Nginx é publicado só em `127.0.0.1:WEB_PORT`. O acesso pela rede passa pelo Caddy (seção abaixo). Em servidor, prefira `./scripts/deploy-compose.sh`, que valida o `.env` e confere os health checks. Para ver logs: `docker compose logs -f`. Para parar: `docker compose down`. O arquivo SQLite persiste no volume `sqlite_data`; `docker compose down -v` também remove os dados.
 
 Para produção, ainda são necessários backup automático e perfis de permissão; esta entrega é um ambiente inicial de demonstração. O passo a passo para um servidor está em [docs/DEPLOY.md](docs/DEPLOY.md).
 
@@ -73,22 +73,31 @@ A sessão é um cookie `HttpOnly` (`intergado_session`, `SameSite=Lax`) guardado
 
 ## HTTPS com Caddy
 
-No Docker Compose, o serviço `caddy` recebe as conexões em HTTPS e as encaminha ao Nginx (`web`). A configuração fica no [`Caddyfile`](Caddyfile) e nestas variáveis do `.env`:
+Mesmo padrão do projeto `jev`, com dois modos de borda (detalhes em [caddy/README.md](caddy/README.md)):
+
+| Modo | Como ativar | Quem escuta 80/443 |
+| --- | --- | --- |
+| **Caddy do host (padrão)** | `COMPOSE_PROFILES` sem `standalone` | `caddy.service` do host, que atende todos os projetos |
+| Caddy do projeto | `COMPOSE_PROFILES=standalone` no `.env` | o serviço `caddy` deste Compose |
+
+**Caddy do host.** O Nginx fica só em `127.0.0.1:WEB_PORT`. O site é gerado do `.env` a partir de [`caddy/host/intergado.caddy.template`](caddy/host/intergado.caddy.template) e instalado em `/etc/caddy/sites/intergado.caddy`:
+
+```bash
+./scripts/install-host-caddy.sh --print   # só mostra o site gerado
+./scripts/install-host-caddy.sh           # instala, valida como usuário caddy e recarrega (usa sudo)
+```
+
+O `/etc/caddy/Caddyfile` do host precisa de `import /etc/caddy/sites/*.caddy`. `CADDY_DOMAIN` é o domínio real ou um nome local como `intergado.localhost`; `localhost` puro é recusado, porque capturaria todos os projetos do host. Instalação do Caddy no Ubuntu 24.04: [docs/DEPLOY.md](docs/DEPLOY.md), seção 1.1.
+
+**Caddy do projeto (`standalone`).** Para máquinas sem Caddy no host:
 
 | Variável | Padrão | Uso |
 | --- | --- | --- |
-| `CADDY_SITE_ADDRESS` | `localhost` | Endereço atendido: `localhost`, um IP ou um domínio. Vários: `"localhost, 192.168.1.10"` (vírgula **e** espaço) |
-| `CADDY_TLS` | `auto` | `auto`: Let's Encrypt para domínio público, certificado interno para `localhost`/IP. `internal`: sempre o certificado interno (rede local, nomes não públicos). `off`: só HTTP, para testes |
-| `CADDY_HTTP_PORT`, `CADDY_HTTPS_PORT` | `80`, `443` | Portas escutadas e publicadas. HTTP redireciona para HTTPS mantendo a porta |
-| `CADDY_LISTEN_HOST` | `0.0.0.0` | Endereço da máquina onde as portas do Caddy são publicadas; `127.0.0.1` restringe ao próprio servidor |
+| `CADDY_DOMAIN` | `localhost` | Domínio atendido. Domínio real: certificado Let's Encrypt; `localhost`: certificado interno |
+| `CADDYFILE` | `./caddy/Caddyfile` | `./caddy/Caddyfile` (HTTPS) ou `./caddy/Caddyfile.local` (HTTP sem TLS, porta 80) |
+| `CADDY_HTTP_PORT`, `CADDY_HTTPS_PORT` | `80`, `443` | Portas publicadas. Em produção mantenha 80 e 443 |
 
-Para testes sem certificado, use `CADDY_TLS=off`: o Caddy atende só HTTP em `http://<ip-da-máquina>:CADDY_HTTP_PORT`, para qualquer host ou IP, sem redirecionar e ignorando `CADDY_SITE_ADDRESS`. Mantenha `AUTH_COOKIE_SECURE=false` nesse modo.
-
-Com os padrões, abra **https://localhost**. Para um domínio público, aponte o DNS para o servidor, mantenha as portas 80 e 443 abertas e defina `CADDY_SITE_ADDRESS=seu.dominio.com.br`: o certificado é emitido e renovado sozinho. Os certificados ficam no volume `caddy_data`.
-
-Com o certificado interno, o navegador avisa até que a CA local do Caddy seja confiável. Para exportá-la: `docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt` e importe o arquivo no navegador ou no sistema.
-
-Quando todo o acesso passar pelo Caddy, use `AUTH_COOKIE_SECURE=true` para o cookie de sessão só trafegar em HTTPS. Com `true`, o login deixa de funcionar pelo HTTP direto (`WEB_PORT`) e pelos scripts de desenvolvimento, que usam o mesmo `.env`. A porta `WEB_PORT` continua publicada para acesso direto ao Nginx em HTTP.
+Nos dois modos, com acesso por HTTPS, use `AUTH_COOKIE_SECURE=true` para o cookie de sessão só trafegar em HTTPS. Com `true`, o login deixa de funcionar pelo HTTP direto (`http://127.0.0.1:WEB_PORT`) e pelos scripts de desenvolvimento, que usam o mesmo `.env`.
 
 ## Desenvolvimento local
 

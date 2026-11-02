@@ -1,6 +1,6 @@
 # Diagramas da aplicação Intergado
 
-Os diagramas abaixo representam a implementação atual com Docker Compose, Caddy (HTTPS), SQLite e login por código enviado por e-mail. No diagrama de sequência, “Nginx ou Vite” inclui o Caddy à frente quando o acesso é por HTTPS. Em desenvolvimento local, o Vite serve o React na porta `APP_DEV_PORT` e encaminha as mesmas rotas para as APIs.
+Os diagramas abaixo representam a implementação atual com Docker Compose, Caddy geral do host (HTTPS), SQLite e login por código enviado por e-mail. No diagrama de sequência, “Nginx ou Vite” inclui o Caddy à frente quando o acesso é por HTTPS. Em desenvolvimento local, o Vite serve o React na porta `APP_DEV_PORT` e encaminha as mesmas rotas para as APIs.
 
 Versões para abrir ou compartilhar: [arquitetura em SVG](ARQUITETURA_APP.svg) e [sequência em SVG](SEQUENCIA_APP.svg).
 
@@ -8,13 +8,12 @@ Versões para abrir ou compartilhar: [arquitetura em SVG](ARQUITETURA_APP.svg) e
 
 ```mermaid
 flowchart LR
-    U["Usuário<br/>navegador"] -->|"HTTPS: 443 (CADDY_HTTPS_PORT)"| CAD
-    U -.->|"HTTP direto: 3000"| W
+    U["Usuário<br/>navegador"] -->|"HTTPS: 443"| CAD
+    CAD["Caddy do host<br/>certificado e HTTPS<br/>/etc/caddy/sites/intergado.caddy"]
+    CAD -->|"HTTP: 127.0.0.1:WEB_PORT (3000)"| W
 
     subgraph Compose["Docker Compose"]
-        CAD["Caddy<br/>certificado e HTTPS"]
         W["Web<br/>Nginx + React"]
-        CAD -->|"HTTP interno"| W
         P["API de cadastros<br/>Spring Boot / Java<br/>porta 8080"]
         A["API de indicadores<br/>Quarkus / Java<br/>porta 8081"]
         DB[("SQLite<br/>volume sqlite_data")]

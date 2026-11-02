@@ -1,0 +1,49 @@
+# Site do Intergado no Caddy geral do host (/etc/caddy/sites/intergado.caddy).
+# Gerado por scripts/install-host-caddy.sh a partir do .env; não edite a cópia em /etc/caddy.
+#   @@DOMAIN@@    CADDY_DOMAIN (domínio real ou um nome *.localhost)
+#   @@WEB_PORT@@  WEB_PORT (Nginx do serviço web publicado em 127.0.0.1)
+# O Caddyfile principal do host precisa conter: import /etc/caddy/sites/*.caddy
+
+@@DOMAIN@@ {
+	encode gzip zstd
+
+	log {
+		output file /var/log/caddy/intergado.log {
+			roll_size 50MiB
+			roll_keep 5
+		}
+	}
+
+	header {
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# HSTS só em domínio real: em nomes locais o navegador passaria a exigir HTTPS em qualquer porta.
+	@hsts not host localhost *.localhost 127.0.0.1
+	header @hsts Strict-Transport-Security "max-age=31536000"
+
+	request_body {
+		max_size 2MB
+	}
+
+	handle /caddy-health {
+		header Content-Type application/json
+		respond `{"status":"ok","service":"caddy","site":"intergado"}` 200
+	}
+
+	# Nginx do Compose: React, /api/* (Spring Boot e Quarkus) e Swagger.
+	handle {
+		reverse_proxy 127.0.0.1:@@WEB_PORT@@ {
+			transport http {
+				dial_timeout 5s
+				read_timeout 60s
+			}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+}

@@ -1,52 +1,111 @@
 # Deploy
 
-Como publicar o Intergado em um servidor Linux com Docker Compose e HTTPS pelo Caddy.
+Como publicar o Intergado em um servidor Linux com Docker Compose e HTTPS pelo Caddy geral do host, no mesmo padrão do projeto `jev`: um `caddy.service` atende todos os projetos, cada um com o seu arquivo em `/etc/caddy/sites/`. Para uma máquina sem Caddy no host, veja [Caddy do projeto (standalone)](#caddy-do-projeto-standalone). Detalhes da borda em [caddy/README.md](../caddy/README.md).
 
 Esta é uma aplicação de **demonstração**. O deploy descrito aqui serve para homologação e avaliação. Para produção ainda faltam perfis de permissão, backup automático e monitoramento (ver [Limitações](#limitações)).
 
 ## Visão geral
 
 ```text
-Internet ──► Caddy :443 (HTTPS) ──► web (Nginx) ──► purchases-api (Spring Boot)
-             Caddy :80 → redireciona            └─► analytics-api (Quarkus)
-                                                        │
-                                          SQLite no volume sqlite_data
+Internet ──► Caddy do host :443 ──► 127.0.0.1:WEB_PORT web (Nginx) ──► purchases-api (Spring Boot)
+             (/etc/caddy/sites/intergado.caddy)                   └─► analytics-api (Quarkus)
+                                                                          │
+                                                            SQLite no volume sqlite_data
 Opcional: compose.evolution.yaml ──► Evolution API + PostgreSQL + Redis (WhatsApp de teste)
 ```
 
 | Serviço | Imagem / build | Porta publicada |
 | --- | --- | --- |
-| `caddy` | `caddy:2.11.7-alpine` | `CADDY_HTTP_PORT` (80) e `CADDY_HTTPS_PORT` (443, TCP e UDP) |
-| `web` | `web/Dockerfile` (Node 24 → Nginx) | `APP_LISTEN_HOST:WEB_PORT` (HTTP direto, sem Caddy) |
+| `web` | `web/Dockerfile` (Node 24 → Nginx) | `127.0.0.1:WEB_PORT` (3000), alvo do Caddy do host |
 | `purchases-api` | `services/purchases-api/Dockerfile` (Java 17) | nenhuma |
 | `analytics-api` | `services/analytics-api/Dockerfile` (Java 17) | nenhuma |
 | `evolution-api` (opcional) | `evoapicloud/evolution-api:v2.3.7` | `EVOLUTION_LISTEN_HOST:EVOLUTION_PORT` (127.0.0.1:8090) |
+| `caddy` (só profile `standalone`) | `caddy:2-alpine` | `CADDY_HTTP_PORT` (80) e `CADDY_HTTPS_PORT` (443) |
 
-Volumes: `sqlite_data` (banco), `caddy_data` (certificados), `caddy_config` e, com o Evolution, `evolution_instances`, `evolution_postgres` e `evolution_redis`.
+Volumes: `sqlite_data` (banco), `caddy_data`/`caddy_config` (só standalone) e, com o Evolution, `evolution_instances`, `evolution_postgres` e `evolution_redis`.
+
+| Script | Uso |
+| --- | --- |
+| `./scripts/deploy-compose.sh [--check] [--skip-build]` | Valida o `.env`, constrói, sobe na ordem certa e confere os health checks e o HTTPS do domínio |
+| `./scripts/install-host-caddy.sh [--print]` | Gera `/etc/caddy/sites/intergado.caddy` do `.env`, valida e recarrega o Caddy do host |
 
 ## Requisitos do servidor
 
-- Linux com Docker Engine e o plugin Docker Compose (`docker compose version`).
+- Ubuntu 24.04 (ou outro Linux com systemd) com Docker Engine e o plugin Docker Compose (`docker compose version`).
+- Caddy do host instalado pelo repositório oficial (seção 1.1).
 - 2 vCPU e 2 GB de RAM, no mínimo; o build das imagens Java usa mais memória que a execução. Com o Evolution, prefira 4 GB.
 - Acesso ao repositório Git e à internet (imagens Docker, dependências Maven e npm, Let's Encrypt, Resend).
-- Para HTTPS com certificado público: um domínio com registro DNS `A` (e `AAAA`, se houver IPv6) apontando para o servidor, e as portas **80 e 443** livres e abertas no firewall. O Let's Encrypt valida pela porta 80 ou 443; em outras portas, só o certificado interno funciona.
+- Para HTTPS com certificado público: um domínio com registro DNS `A` (e `AAAA`, se houver IPv6) apontando para o servidor, e TCP 80/443 e UDP 443 abertos.
 
 ## 1. Preparar o servidor
 
 ```bash
-sudo apt-get update && sudo apt-get install -y git
+sudo apt-get update && sudo apt-get install -y git curl
 # Docker: https://docs.docker.com/engine/install/
 sudo usermod -aG docker "$USER"   # entre de novo na sessão depois
-
-# Firewall (exemplo com ufw): só SSH e o Caddy
-sudo ufw allow OpenSSH
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow 443/udp
-sudo ufw enable
+sudo systemctl enable docker
 ```
 
-Confira que nada mais usa as portas 80 e 443: `sudo ss -ltnp '( sport = :80 or sport = :443 )'`.
+### 1.1 Caddy do host (padrão)
+
+Mesmo procedimento do `jev`. Se o Caddy do host já estiver instalado e com `import /etc/caddy/sites/*.caddy` no Caddyfile principal (por exemplo, pelo deploy do `jev`), pule para a [seção 2](#2-obter-o-código).
+
+Use o repositório oficial do Caddy: o pacote `caddy` do `universe` é a série 2.6, antiga.
+
+1. Libere 80, 443 e 2019 (API de administração, só loopback):
+
+   ```bash
+   sudo ss -ltnp '( sport = :80 or sport = :443 or sport = :2019 )'
+   # apache2/nginx: sudo systemctl disable --now apache2 nginx
+   # Caddy de um projeto em Compose: docker compose stop caddy
+   ```
+
+2. Instale:
+
+   ```bash
+   sudo apt update && sudo apt install -y curl gnupg
+   sudo install -d -m 0755 /etc/apt/keyrings
+   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+     | sudo gpg --dearmor -o /etc/apt/keyrings/caddy-stable.gpg
+   echo "deb [signed-by=/etc/apt/keyrings/caddy-stable.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" \
+     | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+   sudo chmod o+r /etc/apt/keyrings/caddy-stable.gpg /etc/apt/sources.list.d/caddy-stable.list
+   sudo apt update && sudo apt install -y caddy
+   caddy version && systemctl status caddy
+   ```
+
+3. Caddyfile principal com um arquivo por projeto:
+
+   ```bash
+   sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.orig
+   sudo install -d -m 0755 /etc/caddy/sites
+   printf '{\n\temail administrador@example.com\n}\n\nimport /etc/caddy/sites/*.caddy\n' \
+     | sudo tee /etc/caddy/Caddyfile
+   ```
+
+4. Firewall, para domínio real. Com `ufw` (instalado, normalmente inativo no 24.04):
+
+   ```bash
+   sudo ufw allow OpenSSH
+   sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw allow 443/udp
+   sudo ufw enable
+   ```
+
+   O Docker publica portas por fora do `ufw`; o que protege os serviços é publicá-los só em `127.0.0.1`, como faz este Compose.
+
+5. Nomes locais (`*.localhost`): a CA interna do Caddy aparece no primeiro acesso. Para o navegador confiar:
+
+   ```bash
+   CA=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+   sudo cp "$CA" /usr/local/share/ca-certificates/caddy-local.crt && sudo update-ca-certificates
+   sudo cat "$CA" > /tmp/caddy-root.crt
+   sudo apt install -y libnss3-tools
+   certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Caddy Local CA" -i /tmp/caddy-root.crt   # Chrome
+   ```
+
+   No Firefox (snap), importe `/tmp/caddy-root.crt` em Configurações → Certificados → Autoridades. O `sudo caddy trust` grava no NSS do root e não alcança o navegador do usuário.
+
+Certificados e estado ACME ficam em `/var/lib/caddy`; logs do site em `/var/log/caddy/intergado.log` e do serviço em `journalctl -u caddy`. Atualize com `sudo apt upgrade caddy`; `sudo systemctl reload caddy` aplica configuração sem derrubar conexões.
 
 ## 2. Obter o código
 
@@ -64,42 +123,41 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-O `.env` fica fora do Git e guarda chaves; nunca faça commit dele. Ajuste ao menos:
+O `.env` fica fora do Git e guarda chaves; nunca faça commit dele. Ajuste ao menos, sem `standalone` em `COMPOSE_PROFILES`:
 
 | Variável | Valor no servidor |
 | --- | --- |
-| `CADDY_SITE_ADDRESS` | O domínio, ex.: `intergado.seudominio.com.br`. Vários: `"intergado.seudominio.com.br, www.intergado.seudominio.com.br"` (vírgula **e** espaço) |
-| `CADDY_TLS` | `auto` com domínio público. `internal` em rede interna ou sem DNS público. `off` só para testes: HTTP puro, sem certificado (exige `AUTH_COOKIE_SECURE=false`) |
-| `CADDY_LISTEN_HOST` | `0.0.0.0` (todas as interfaces) ou um IP específico do servidor |
-| `CADDY_HTTP_PORT`, `CADDY_HTTPS_PORT` | `80` e `443` |
-| `APP_LISTEN_HOST` | `127.0.0.1`, para a porta HTTP direta (`WEB_PORT`) não ficar exposta; o acesso externo passa só pelo Caddy |
+| `CADDY_DOMAIN` | O domínio, ex.: `intergado.seudominio.com.br`, ou `intergado.localhost` para uso local. Cada projeto do host precisa de um nome próprio; `localhost` puro é recusado |
+| `WEB_PORT` | `3000`, ou outra porta livre no loopback do servidor (diferente das usadas por outros projetos, ex.: `APP_PORT` do `jev`) |
 | `AUTH_ALLOWED_EMAILS` | E-mails que podem entrar, separados por vírgula |
 | `AUTH_COOKIE_SECURE` | `true`: o cookie de sessão só trafega em HTTPS |
 | `RESEND_API_KEY` | Chave do Resend (`re_...`). Sem ela, ninguém recebe o código (ele vai só para o log) |
 | `AUTH_EMAIL_FROM` | Remetente de um domínio verificado no Resend, **entre aspas**: `"Intergado <login@seudominio.com.br>"` |
 
-Com `AUTH_COOKIE_SECURE=true`, o login pelo HTTP direto (`WEB_PORT`) deixa de funcionar; é o esperado em servidor.
+Com `AUTH_COOKIE_SECURE=true`, o login pelo HTTP direto (`http://127.0.0.1:WEB_PORT`) deixa de funcionar; é o esperado em servidor. Em nomes `*.localhost` o navegador já resolve para 127.0.0.1, sem editar o `/etc/hosts`.
 
 Para o WhatsApp de teste, veja a [seção do Evolution](#evolution-api-opcional).
 
-## 4. Subir a aplicação
+## 4. Subir a aplicação e instalar o site
 
 ```bash
-docker compose up --build -d
-docker compose ps
+./scripts/deploy-compose.sh --check   # só valida
+./scripts/deploy-compose.sh
+./scripts/install-host-caddy.sh
+curl -I https://intergado.seudominio.com.br/health
 ```
 
-O primeiro build baixa dependências e leva alguns minutos. A ordem de subida é automática: o Spring Boot cria as tabelas e os dados de exemplo, o Quarkus espera o Spring ficar saudável, depois sobem o Nginx e o Caddy.
+O primeiro build baixa dependências e leva alguns minutos. O `deploy-compose.sh` sobe as APIs, espera ficarem saudáveis, recria o Nginx, confere `http://127.0.0.1:WEB_PORT/health` e o HTTPS do domínio. No modo do host ele avisa quando o `caddy.service` está parado ou quando `/etc/caddy/sites/intergado.caddy` falta ou diverge do `.env`.
 
-Na primeira subida com domínio público, o Caddy emite o certificado em alguns segundos. Acompanhe com `docker compose logs -f caddy` (procure `certificate obtained successfully`).
+O `install-host-caddy.sh` gera `/etc/caddy/sites/intergado.caddy` a partir de `caddy/host/intergado.caddy.template`, valida como usuário `caddy`, restaura o arquivo anterior se a validação falhar e só então recarrega. Rode de novo sempre que mudar `CADDY_DOMAIN` ou `WEB_PORT`. Não edite a cópia em `/etc/caddy/sites`. Mudanças de site afetam todos os projetos; o script nunca recarrega sem validar.
 
 ## 5. Verificar
 
 ```bash
 DOMINIO=intergado.seudominio.com.br
-curl -sI http://$DOMINIO | head -3                                 # 301 para https://
+curl -sI http://$DOMINIO | head -3                                         # 308 para https://
+curl -s  https://$DOMINIO/caddy-health                                     # {"status":"ok","service":"caddy","site":"intergado"}
 curl -s  -o /dev/null -w '%{http_code}\n' https://$DOMINIO/api/purchases   # 401 sem sessão
-# Os healthchecks não passam pelo Nginx; consulte dentro dos contêineres:
 docker compose exec purchases-api curl -fsS http://localhost:8080/actuator/health
 docker compose exec analytics-api curl -fsS http://localhost:8081/q/health/ready
 ```
@@ -118,18 +176,18 @@ Se o e-mail não chegar, procure `Resend` em `docker compose logs purchases-api`
 cd intergado
 # antes: faça o backup do banco (seção abaixo)
 git pull
-docker compose up --build -d
+./scripts/deploy-compose.sh
 docker image prune -f
 ```
 
-As tabelas são criadas com `CREATE TABLE IF NOT EXISTS` na inicialização do Spring Boot; os dados existentes ficam no volume. Mudanças só no `Caddyfile` ou nas variáveis `CADDY_*`: `docker compose up -d caddy` (recria o contêiner com o novo ambiente) ou `docker compose restart caddy`.
+As tabelas são criadas com `CREATE TABLE IF NOT EXISTS` na inicialização do Spring Boot; os dados existentes ficam no volume. Se o `caddy/host/intergado.caddy.template` mudou, o deploy avisa que o site instalado diverge: rode `./scripts/install-host-caddy.sh`.
 
 ### Voltar para a versão anterior
 
 ```bash
 git log --oneline -5
 git checkout <commit-anterior>
-docker compose up --build -d
+./scripts/deploy-compose.sh
 ```
 
 Se a versão nova alterou dados de forma incompatível, restaure também o backup do banco (abaixo). Depois de corrigir, volte com `git checkout main`.
@@ -157,7 +215,7 @@ docker run --rm -v "$VOLUME":/data -v "$PWD/backups":/backup alpine:3.22 \
 docker compose up -d
 ```
 
-Os certificados (`caddy_data`) são reemitidos sozinhos se perdidos; não precisam de backup. Com o Evolution, o volume `evolution_instances` guarda o pareamento do WhatsApp: perdê-lo exige parear de novo.
+Os certificados ficam com o Caddy do host (`/var/lib/caddy`) e são reemitidos sozinhos se perdidos. Com o Evolution, o volume `evolution_instances` guarda o pareamento do WhatsApp: perdê-lo exige parear de novo.
 
 ## Evolution API (opcional)
 
@@ -170,11 +228,13 @@ Apenas para testes de WhatsApp; detalhes em [EVOLUTION_API.md](EVOLUTION_API.md)
    echo "EVOLUTION_POSTGRES_PASSWORD=$(openssl rand -hex 12)"
    ```
 
-2. Suba tudo junto, sempre com os dois arquivos (inclusive em `down`, `ps` e `logs`):
+2. No `.env`, inclua o arquivo do Evolution no Compose; assim `deploy-compose.sh`, `up`, `down`, `ps` e `logs` já usam os dois:
 
-   ```bash
-   docker compose -f compose.yaml -f compose.evolution.yaml up --build -d
+   ```env
+   COMPOSE_FILE=compose.yaml:compose.evolution.yaml
    ```
+
+   Depois rode `./scripts/deploy-compose.sh`.
 
 3. Mantenha `EVOLUTION_LISTEN_HOST=127.0.0.1`. O Spring Boot alcança o Evolution pela rede interna (`http://evolution-api:8080`); o painel `/manager` fica só no servidor. Para abri-lo do seu computador, use um túnel SSH: `ssh -L 8090:127.0.0.1:8090 usuario@servidor` e acesse `http://localhost:8090/manager`.
 4. Pareie o WhatsApp pela tela **Integrações** do painel.
@@ -184,24 +244,26 @@ Apenas para testes de WhatsApp; detalhes em [EVOLUTION_API.md](EVOLUTION_API.md)
 | Tarefa | Comando |
 | --- | --- |
 | Estado dos serviços | `docker compose ps` |
-| Logs | `docker compose logs -f --tail=100 purchases-api` (ou `caddy`, `web`, `analytics-api`) |
+| Logs | `docker compose logs -f --tail=100 purchases-api` (ou `web`, `analytics-api`); Caddy: `sudo journalctl -u caddy -f` |
 | Reiniciar um serviço | `docker compose restart purchases-api` |
 | Parar mantendo os dados | `docker compose down` |
-| Parar e **apagar** banco, certificados e sessões | `docker compose down -v` |
+| Parar e **apagar** banco e sessões | `docker compose down -v` |
+| Conferir configuração e site do Caddy | `./scripts/deploy-compose.sh --check` |
 | Liberar um e-mail | Inclua em `AUTH_ALLOWED_EMAILS` e rode `docker compose up -d purchases-api` |
 | Remover um e-mail | Tire da lista e rode o mesmo comando; as sessões dele são encerradas |
 
-`caddy` e os contêineres do Evolution sobem sozinhos após reiniciar o servidor (`restart: unless-stopped`). Para os demais, `docker compose up -d` depois do boot; ou acrescente `restart: unless-stopped` a eles em um `compose.override.yaml` no servidor.
+Todos os contêineres sobem sozinhos após reiniciar o servidor (`restart: unless-stopped`, com o serviço Docker habilitado). O Caddy do host sobe pelo systemd.
 
 ## Problemas comuns
 
 | Sintoma | Causa provável e solução |
 | --- | --- |
-| `bind: address already in use` no `caddy` | Outro serviço usa 80/443. Libere as portas ou mude `CADDY_HTTP_PORT`/`CADDY_HTTPS_PORT` (sem Let's Encrypt nesse caso) |
-| Caddy não obtém certificado | DNS não aponta para o servidor, porta 80/443 fechada no firewall ou na nuvem, ou limite de emissões do Let's Encrypt. Veja `docker compose logs caddy` |
-| Erro ao ler `CADDY_SITE_ADDRESS` com vários endereços | Separe com vírgula **e** espaço e use aspas |
-| Navegador avisa de certificado inválido | `CADDY_TLS=internal` ou acesso por IP. Exporte a CA: `docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt` e instale nos clientes |
-| `https://` não responde | `CADDY_TLS=off` ativo: só HTTP na `CADDY_HTTP_PORT` |
+| `502 Bad Gateway` no domínio | O Nginx não responde em `127.0.0.1:WEB_PORT`: `docker compose ps`, `curl http://127.0.0.1:3000/health`; se mudou `WEB_PORT`, rode `./scripts/install-host-caddy.sh` |
+| Domínio não responde / outro site aparece | Site não instalado ou divergente: `./scripts/deploy-compose.sh --check` e `./scripts/install-host-caddy.sh`. Confira `import /etc/caddy/sites/*.caddy` no `/etc/caddy/Caddyfile` |
+| `CADDY_DOMAIN=localhost ... capturaria todos os projetos` | Use um nome próprio (`intergado.localhost`) ou o domínio real |
+| `port is already allocated` no `caddy` do Compose | `standalone` ativo junto com o Caddy do host. Tire `standalone` de `COMPOSE_PROFILES` e rode `docker compose rm -sf caddy` |
+| Caddy não obtém certificado | DNS não aponta para o servidor, porta 80/443 fechada no firewall ou na nuvem, ou limite de emissões do Let's Encrypt. Veja `journalctl -u caddy` |
+| Navegador avisa de certificado inválido | Nome `*.localhost` com a CA interna: confie na CA (seção 1.1, passo 5) |
 | Login volta para a tela de e-mail | `AUTH_COOKIE_SECURE=true` acessando por HTTP, ou e-mail fora de `AUTH_ALLOWED_EMAILS` |
 | Código não chega | `RESEND_API_KEY` vazia ou inválida, ou remetente fora de domínio verificado. Veja `docker compose logs purchases-api` |
 | Painel mostra “Serviços indisponíveis” | `docker compose ps`: o Spring ou o Quarkus não ficou saudável. Veja os logs do serviço |
@@ -211,13 +273,28 @@ Apenas para testes de WhatsApp; detalhes em [EVOLUTION_API.md](EVOLUTION_API.md)
 ## Checklist do deploy
 
 - [ ] DNS do domínio aponta para o servidor
-- [ ] Portas 80 e 443 livres e abertas; `WEB_PORT` e `8090` não expostas
-- [ ] `.env` criado com `chmod 600`, `CADDY_SITE_ADDRESS`, `AUTH_ALLOWED_EMAILS`, `AUTH_COOKIE_SECURE=true`, `RESEND_API_KEY` e `AUTH_EMAIL_FROM`
-- [ ] `docker compose up --build -d` sem erros e todos os serviços `healthy`/`running`
+- [ ] Caddy do host ativo nas portas 80 e 443, com `import /etc/caddy/sites/*.caddy`; `WEB_PORT` e `8090` só em `127.0.0.1`
+- [ ] `.env` criado com `chmod 600`, `CADDY_DOMAIN`, `AUTH_ALLOWED_EMAILS`, `AUTH_COOKIE_SECURE=true`, `RESEND_API_KEY` e `AUTH_EMAIL_FROM`, sem `standalone`
+- [ ] `./scripts/deploy-compose.sh` sem erros nem avisos de Caddy
+- [ ] `./scripts/install-host-caddy.sh` instalou `/etc/caddy/sites/intergado.caddy`
 - [ ] HTTP redireciona para HTTPS e o certificado é válido
 - [ ] Login por e-mail funciona
 - [ ] Backup do banco testado (cópia e restauração)
 - [ ] Opcional: Evolution no ar e WhatsApp pareado
+
+## Caddy do projeto (standalone)
+
+Para rodar o Intergado sozinho, sem Caddy no host (demonstração, máquina de desenvolvimento). Não use junto com o Caddy do host: os dois disputam as portas 80/443.
+
+```env
+COMPOSE_PROFILES=standalone
+CADDY_DOMAIN=intergado.seudominio.com.br   # ou localhost
+CADDYFILE=./caddy/Caddyfile                # ./caddy/Caddyfile.local: HTTP sem TLS
+CADDY_HTTP_PORT=80
+CADDY_HTTPS_PORT=443
+```
+
+Depois, `./scripts/deploy-compose.sh` (recria o Caddy após o Nginx e confere `/caddy-health` e `/health`). Logs: `docker compose logs -f caddy`. Certificados nos volumes `caddy_data` e `caddy_config`. Arquivos e detalhes em [caddy/README.md](../caddy/README.md).
 
 ## Limitações
 
