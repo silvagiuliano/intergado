@@ -12,22 +12,17 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Duration;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -42,6 +37,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class AuthController {
     public static final String COOKIE = "intergado_session";
     public static final String EMAIL_ATTRIBUTE = "authEmail";
+    public static final String ROLE_ATTRIBUTE = "authRole";
     static final String NOW = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
     private static final int MAX_ATTEMPTS = 5;
     private static final Logger log = LoggerFactory.getLogger(AuthController.class);
@@ -49,19 +45,18 @@ public class AuthController {
 
     private final JdbcTemplate jdbc;
     private final ResendMailer mailer;
-    private final String allowedEmails;
+    private final UserService users;
     private final int codeMinutes;
     private final int sessionDays;
     private final boolean cookieSecure;
 
-    public AuthController(JdbcTemplate jdbc, ResendMailer mailer,
-                          @Value("${app.auth.allowed-emails}") String allowedEmails,
+    public AuthController(JdbcTemplate jdbc, ResendMailer mailer, UserService users,
                           @Value("${app.auth.code-minutes}") int codeMinutes,
                           @Value("${app.auth.session-days}") int sessionDays,
                           @Value("${app.auth.cookie-secure}") boolean cookieSecure) {
         this.jdbc = jdbc;
         this.mailer = mailer;
-        this.allowedEmails = allowedEmails;
+        this.users = users;
         this.codeMinutes = codeMinutes;
         this.sessionDays = sessionDays;
         this.cookieSecure = cookieSecure;
@@ -70,22 +65,7 @@ public class AuthController {
     public record CodeRequest(@NotBlank @Email @Size(max = 254) String email) {}
     public record CodeVerification(@NotBlank @Email @Size(max = 254) String email,
                                    @NotBlank @Pattern(regexp = "\\d{6}") String code) {}
-    public record Session(String email) {}
-
-    /** AUTH_ALLOWED_EMAILS is the source of truth: emails removed from it lose access on restart. */
-    @EventListener(ApplicationReadyEvent.class)
-    @Transactional
-    public void syncAllowedEmails() {
-        List<String> emails = Arrays.stream(allowedEmails.split(","))
-            .map(AuthController::normalize).filter(email -> !email.isEmpty()).distinct().toList();
-        jdbc.update("UPDATE users SET active = 0");
-        for (String email : emails) {
-            jdbc.update("INSERT INTO users (email) VALUES (?) ON CONFLICT(email) DO UPDATE SET active = 1", email);
-        }
-        jdbc.update("DELETE FROM sessions WHERE email IN (SELECT email FROM users WHERE active = 0)");
-        if (emails.isEmpty()) log.warn("AUTH_ALLOWED_EMAILS vazio: ninguém conseguirá entrar no sistema.");
-        else log.info("{} e-mail(s) autorizado(s) para login.", emails.size());
-    }
+    public record Session(String email, String name, Role role) {}
 
     /** Always answers the same way, so the response does not reveal which emails are authorized. */
     @PostMapping("/request-code")
@@ -139,12 +119,18 @@ public class AuthController {
         jdbc.update("INSERT INTO sessions (token_hash, email, expires_at) VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?))",
             sha256(token), email, "+" + sessionDays + " days");
         response.addHeader(HttpHeaders.SET_COOKIE, cookie(token, Duration.ofDays(sessionDays)).toString());
-        return new Session(email);
+        users.recordLogin(email);
+        return session(email);
     }
 
     @GetMapping("/me")
     public Session me(HttpServletRequest request) {
-        return new Session((String) request.getAttribute(EMAIL_ATTRIBUTE));
+        return session((String) request.getAttribute(EMAIL_ATTRIBUTE));
+    }
+
+    private Session session(String email) {
+        UserService.User user = users.find(email).orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
+        return new Session(user.email(), user.name(), user.role());
     }
 
     @PostMapping("/logout")

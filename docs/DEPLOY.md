@@ -2,7 +2,7 @@
 
 Como publicar o Intergado em um servidor Linux com Docker Compose e HTTPS pelo Caddy geral do host, no mesmo padrão do projeto `jev`: um `caddy.service` atende todos os projetos, cada um com o seu arquivo em `/etc/caddy/sites/`. Para uma máquina sem Caddy no host, veja [Caddy do projeto (standalone)](#caddy-do-projeto-standalone). Detalhes da borda em [caddy/README.md](../caddy/README.md).
 
-Esta é uma aplicação de **demonstração**. O deploy descrito aqui serve para homologação e avaliação. Para produção ainda faltam perfis de permissão, backup automático e monitoramento (ver [Limitações](#limitações)).
+Esta é uma aplicação de **demonstração**. O deploy descrito aqui serve para homologação e avaliação. Para produção ainda faltam backup automático, histórico de alterações e monitoramento (ver [Limitações](#limitações)).
 
 ## Visão geral
 
@@ -129,7 +129,7 @@ O `.env` fica fora do Git e guarda chaves; nunca faça commit dele. Ajuste ao me
 | --- | --- |
 | `CADDY_DOMAIN` | O domínio, ex.: `intergado.seudominio.com.br`, ou `intergado.localhost` para uso local. Cada projeto do host precisa de um nome próprio; `localhost` puro é recusado |
 | `WEB_PORT` | `3000`, ou outra porta livre no loopback do servidor (diferente das usadas por outros projetos, ex.: `APP_PORT` do `jev`) |
-| `AUTH_ALLOWED_EMAILS` | E-mails que podem entrar, separados por vírgula |
+| `AUTH_ADMIN_EMAILS` | Administradores iniciais, separados por vírgula. Os demais usuários são cadastrados na tela **Usuários** |
 | `AUTH_COOKIE_SECURE` | `true`: o cookie de sessão só trafega em HTTPS |
 | `RESEND_API_KEY` | Chave do Resend (`re_...`). Sem ela, ninguém recebe o código (ele vai só para o log) |
 | `AUTH_EMAIL_FROM` | Remetente de um domínio verificado no Resend, **entre aspas**: `"Intergado <login@seudominio.com.br>"` |
@@ -165,8 +165,8 @@ docker compose exec analytics-api curl -fsS http://localhost:8081/q/health/ready
 Depois, no navegador:
 
 1. Abra `https://<domínio>`; o cadeado deve aparecer sem aviso.
-2. Entre com um e-mail de `AUTH_ALLOWED_EMAILS` e o código recebido.
-3. Confira o painel, a tela **Integrações** e o Swagger (`/swagger-ui/index.html` e `/q/swagger-ui`).
+2. Entre com um e-mail de `AUTH_ADMIN_EMAILS` e o código recebido.
+3. Confira o painel, as telas **Usuários** e **Integrações** e o Swagger (`/swagger-ui/index.html` e `/q/swagger-ui`).
 
 Se o e-mail não chegar, procure `Resend` em `docker compose logs purchases-api`.
 
@@ -249,8 +249,9 @@ Apenas para testes de WhatsApp; detalhes em [EVOLUTION_API.md](EVOLUTION_API.md)
 | Parar mantendo os dados | `docker compose down` |
 | Parar e **apagar** banco e sessões | `docker compose down -v` |
 | Conferir configuração e site do Caddy | `./scripts/deploy-compose.sh --check` |
-| Liberar um e-mail | Inclua em `AUTH_ALLOWED_EMAILS` e rode `docker compose up -d purchases-api` |
-| Remover um e-mail | Tire da lista e rode o mesmo comando; as sessões dele são encerradas |
+| Liberar um e-mail ou mudar o perfil | Tela **Usuários** (administrador); vale na hora, sem reiniciar |
+| Remover um acesso | Tela **Usuários** → **Desativar**; as sessões dele são encerradas |
+| Recuperar o acesso de administrador | Coloque o e-mail em `AUTH_ADMIN_EMAILS` e rode `docker compose up -d purchases-api`; só tem efeito se não houver administrador ativo |
 
 Todos os contêineres sobem sozinhos após reiniciar o servidor (`restart: unless-stopped`, com o serviço Docker habilitado). O Caddy do host sobe pelo systemd.
 
@@ -265,7 +266,7 @@ Todos os contêineres sobem sozinhos após reiniciar o servidor (`restart: unles
 | `docker compose ps` não mostra o Evolution | Falta `COMPOSE_FILE=compose.yaml:compose.evolution.yaml` no `.env` |
 | Caddy não obtém certificado | DNS não aponta para o servidor, porta 80/443 fechada no firewall ou na nuvem, ou limite de emissões do Let's Encrypt. Veja `journalctl -u caddy` |
 | Navegador avisa de certificado inválido | Nome `*.localhost` com a CA interna: confie na CA (seção 1.1, passo 5) |
-| Login volta para a tela de e-mail | `AUTH_COOKIE_SECURE=true` acessando por HTTP, ou e-mail fora de `AUTH_ALLOWED_EMAILS` |
+| Login volta para a tela de e-mail | `AUTH_COOKIE_SECURE=true` acessando por HTTP, ou usuário não cadastrado/desativado na tela **Usuários** |
 | Código não chega | `RESEND_API_KEY` vazia ou inválida, ou remetente fora de domínio verificado. Veja `docker compose logs purchases-api` |
 | Painel mostra “Serviços indisponíveis” | `docker compose ps`: o Spring ou o Quarkus não ficou saudável. Veja os logs do serviço |
 | `EVOLUTION_API_KEY` exigida ao subir | Faltou a chave no `.env` ao usar `compose.evolution.yaml` |
@@ -275,7 +276,7 @@ Todos os contêineres sobem sozinhos após reiniciar o servidor (`restart: unles
 
 - [ ] DNS do domínio aponta para o servidor
 - [ ] Caddy do host ativo nas portas 80 e 443, com `import /etc/caddy/sites/*.caddy`; `WEB_PORT` e `8090` só em `127.0.0.1`
-- [ ] `.env` criado com `chmod 600`, `CADDY_DOMAIN`, `AUTH_ALLOWED_EMAILS`, `AUTH_COOKIE_SECURE=true`, `RESEND_API_KEY` e `AUTH_EMAIL_FROM`, sem `standalone`
+- [ ] `.env` criado com `chmod 600`, `CADDY_DOMAIN`, `AUTH_ADMIN_EMAILS`, `AUTH_COOKIE_SECURE=true`, `RESEND_API_KEY` e `AUTH_EMAIL_FROM`, sem `standalone`
 - [ ] `./scripts/deploy-compose.sh` sem erros nem avisos de Caddy
 - [ ] `./scripts/install-host-caddy.sh` instalou `/etc/caddy/sites/intergado.caddy`
 - [ ] HTTP redireciona para HTTPS e o certificado é válido
@@ -345,6 +346,6 @@ Para migrar uma máquina do modo standalone para o Caddy do host: tire `standalo
 
 - Banco SQLite em um único servidor: sem réplica nem escala horizontal.
 - Backup manual ou por `cron`; sem rotina automática no projeto.
-- Todos os usuários autorizados têm o mesmo acesso; não há perfis.
+- Perfis globais (`LEITOR`, `OPERADOR`, `ADMIN`), sem restrição por fazenda e sem histórico completo das alterações de usuários.
 - O Evolution API é uma integração não oficial do WhatsApp, só para testes, e envia apenas aos números de teste.
 - Sem monitoramento nem alertas além dos healthchecks do Compose.

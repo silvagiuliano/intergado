@@ -82,8 +82,8 @@ for path in compose.yaml web/nginx.conf ${caddyfile:+"$caddyfile"}; do
 done
 docker compose config --quiet || fail "configuração Compose inválida"
 
-[[ -n "$(env_value AUTH_ALLOWED_EMAILS)" ]] \
-  || warn "AUTH_ALLOWED_EMAILS vazio: ninguém conseguirá entrar no painel"
+[[ -n "$(env_value AUTH_ADMIN_EMAILS "$(env_value AUTH_ALLOWED_EMAILS)")" ]] \
+  || warn "AUTH_ADMIN_EMAILS vazio: sem administrador inicial, só entra quem já estiver cadastrado na base"
 [[ -n "$(env_value RESEND_API_KEY)" ]] \
   || warn "RESEND_API_KEY vazio: o código de login só aparece no log do purchases-api"
 if [[ "$edge" == host || "$caddyfile" != *Caddyfile.local ]]; then

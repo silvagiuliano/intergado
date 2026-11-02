@@ -24,6 +24,7 @@ const Icon = ({ name, size = 20 }) => {
     logout: <><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l5-5-5-5M15 12H4"/></>,
     plug: <><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v4"/></>,
     leaf: <><path d="M20 4c-9 0-15 3-15 11a5 5 0 0 0 5 5c8 0 11-6 10-16Z"/><path d="M4 21c3-7 7-10 13-13"/></>,
+    users: <><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/></>,
   }
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
 }
@@ -41,6 +42,11 @@ async function readJson(url, options) {
   }
   return response.json()
 }
+
+const roleLabels = { LEITOR: 'Leitor', OPERADOR: 'Operador', ADMIN: 'Administrador' }
+// Admin-only screens; other roles land on the dashboard even with the hash in the URL.
+const adminViews = { '#integracoes': 'integrations', '#usuarios': 'users' }
+const viewFor = (hash, role) => role === 'ADMIN' && adminViews[hash] || 'dashboard'
 
 const postJson = (url, body) => readJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 
@@ -125,9 +131,11 @@ function App({ user, onLogout, onExpired }) {
   const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [view, setView] = useState(() => window.location.hash === '#integracoes' ? 'integrations' : 'dashboard')
+  const isAdmin = user.role === 'ADMIN'
+  const canEdit = user.role === 'ADMIN' || user.role === 'OPERADOR'
+  const [view, setView] = useState(() => viewFor(window.location.hash, user.role))
   useEffect(() => {
-    const sync = () => setView(window.location.hash === '#integracoes' ? 'integrations' : 'dashboard')
+    const sync = () => setView(viewFor(window.location.hash, user.role))
     window.addEventListener('hashchange', sync)
     return () => window.removeEventListener('hashchange', sync)
   }, [])
@@ -184,18 +192,19 @@ function App({ user, onLogout, onExpired }) {
         <a href="#fazendas"><Icon name="leaf"/> Fazendas</a>
         <a href="#solicitacoes"><Icon name="box"/> Solicitações</a>
         <a href="#indicadores"><Icon name="chart"/> Indicadores</a>
-        <a className={view === 'integrations' ? 'nav-active' : ''} href="#integracoes"><Icon name="plug"/> Integrações</a>
+        {isAdmin && <a className={view === 'integrations' ? 'nav-active' : ''} href="#integracoes"><Icon name="plug"/> Integrações</a>}
+        {isAdmin && <a className={view === 'users' ? 'nav-active' : ''} href="#usuarios"><Icon name="users"/> Usuários</a>}
         <a href="/swagger-ui/index.html" target="_blank" rel="noreferrer"><Icon name="box"/> API de cadastros</a>
         <a href="/q/swagger-ui" target="_blank" rel="noreferrer"><Icon name="chart"/> API de indicadores</a>
       </nav>
       <div className="sidebar-bottom"><div className="sidebar-dot"/> Ambiente de demonstração <small>Compras ilustrativas · saldos históricos</small></div>
     </aside>
 
-    {view === 'integrations' ? <main className="content"><header className="topbar"><div className="breadcrumbs">Configuração <span>/</span> <strong>Integrações</strong></div><div className="topbar-right"><span className="user-email">{user.email}</span><button className="refresh logout" onClick={onLogout} title="Sair" aria-label="Sair"><Icon name="logout" size={17}/></button></div></header><div className="page"><Integrations onExpired={onExpired}/></div></main> :
+    {view !== 'dashboard' ? <main className="content"><header className="topbar"><div className="breadcrumbs">Configuração <span>/</span> <strong>{view === 'users' ? 'Usuários' : 'Integrações'}</strong></div><div className="topbar-right"><span className="user-email" title={roleLabels[user.role]}>{user.email} · {roleLabels[user.role]}</span><button className="refresh logout" onClick={onLogout} title="Sair" aria-label="Sair"><Icon name="logout" size={17}/></button></div></header><div className="page">{view === 'users' ? <Users user={user} onExpired={onExpired}/> : <Integrations onExpired={onExpired}/>}</div></main> :
     <main id="visao" className="content">
-      <header className="topbar"><div className="breadcrumbs">Operação <span>/</span> Fazendas <span>/</span> <strong>Visão geral</strong></div><div className="topbar-right"><span className="live-dot"/> Compras atualizadas ao abrir <button className="refresh" onClick={load} title="Atualizar dados" aria-label="Atualizar dados"><Icon name="refresh" size={17}/></button><span className="user-email">{user.email}</span><button className="refresh logout" onClick={onLogout} title="Sair" aria-label="Sair"><Icon name="logout" size={17}/></button></div></header>
+      <header className="topbar"><div className="breadcrumbs">Operação <span>/</span> Fazendas <span>/</span> <strong>Visão geral</strong></div><div className="topbar-right"><span className="live-dot"/> Compras atualizadas ao abrir <button className="refresh" onClick={load} title="Atualizar dados" aria-label="Atualizar dados"><Icon name="refresh" size={17}/></button><span className="user-email" title={roleLabels[user.role]}>{user.email} · {roleLabels[user.role]}</span><button className="refresh logout" onClick={onLogout} title="Sair" aria-label="Sair"><Icon name="logout" size={17}/></button></div></header>
       <div className="page">
-        <div className="page-heading"><div><div className="eyebrow">INTELIGÊNCIA OPERACIONAL</div><h1>Visão das fazendas</h1><p>Consulte o histórico do rebanho por fazenda e acompanhe as compras da aplicação.</p></div><button className="primary" onClick={() => setShowForm(true)}><Icon name="plus" size={19}/> Nova solicitação</button></div>
+        <div className="page-heading"><div><div className="eyebrow">INTELIGÊNCIA OPERACIONAL</div><h1>Visão das fazendas</h1><p>Consulte o histórico do rebanho por fazenda e acompanhe as compras da aplicação.</p></div>{canEdit && <button className="primary" onClick={() => setShowForm(true)}><Icon name="plus" size={19}/> Nova solicitação</button>}</div>
         {error && <div className="error" role="alert">{error} <button onClick={load}>Tentar novamente</button></div>}
         {overview?.demoData && <div className="demo-note">As solicitações de compra são exemplos, não dados importados das planilhas. Bases criadas antes desta atualização podem conter a fazenda ilustrativa “Boa Vista”; esses registros foram preservados.</div>}
         <section id="fazendas" className="farms-section" aria-labelledby="farms-title">
@@ -222,13 +231,92 @@ function App({ user, onLogout, onExpired }) {
           <div className="panel category"><div className="panel-head"><div><h2>Por categoria</h2><p>Valor estimado das solicitações</p></div></div><div className="category-list">{(overview?.byCategory || []).map((group, i) => <div className="category-row" key={group.name}><div className="category-line"><span><i className={`category-dot dot-${i % 4}`}/>{group.name}</span><strong>{money(group.amount)}</strong></div><div className="progress"><span style={{width: `${Number(group.amount) / maxCategory * 100}%`}}/></div></div>)}{overview && !overview.byCategory.length && <p className="empty">Sem dados no período.</p>}</div></div>
         </section>
 
-        <section id="solicitacoes" className="panel requests"><div className="panel-head request-head"><div><h2>Solicitações recentes</h2><p>Compras da aplicação; os exemplos não foram extraídos das planilhas.</p></div><div className="request-controls"><label className="search"><Icon name="search" size={17}/><input placeholder="Buscar solicitação" value={search} onChange={e => setSearch(e.target.value)} aria-label="Buscar solicitação"/></label><select value={farmFilter} onChange={e => setFarmFilter(e.target.value)} aria-label="Filtrar por fazenda"><option value="ALL">Todas as fazendas</option>{purchaseFarms.map(farm => <option key={farm} value={farm}>{farm}</option>)}</select><select value={filter} onChange={e => setFilter(e.target.value)} aria-label="Filtrar por status"><option value="ALL">Todos os status</option>{statusOrder.map(s => <option key={s} value={s}>{statusLabels[s]}</option>)}</select></div></div><div className="table-wrap"><table><thead><tr><th>SOLICITAÇÃO</th><th>FAZENDA</th><th>DATA</th><th>VALOR</th><th>STATUS</th><th>ATUALIZAR</th></tr></thead><tbody>{visible.map(item => <tr key={item.id}><td><span className="item-title">{item.title}</span><span className="item-sub">#{String(item.id).padStart(4, '0')} · {item.category}{item.demo ? ' · Exemplo' : ''}</span></td><td>{item.farm}</td><td>{date(item.requestedAt)}</td><td className="amount">{money(item.amount)}</td><td><span className={`badge badge-${item.status.toLowerCase()}`}>{statusLabels[item.status]}</span></td><td><select className="status-select" value={item.status} onChange={e => changeStatus(item.id, e.target.value)} aria-label={`Atualizar status de ${item.title}`}>{statusOrder.map(s => <option key={s} value={s}>{statusLabels[s]}</option>)}</select></td></tr>)}</tbody></table>{!loading && !visible.length && <div className="empty-table">Nenhuma solicitação encontrada.</div>}</div><div className="table-foot">Exibindo {visible.length} de {purchases.length} solicitações <span>Limite de 100 solicitações recentes</span></div></section>
+        <section id="solicitacoes" className="panel requests"><div className="panel-head request-head"><div><h2>Solicitações recentes</h2><p>Compras da aplicação; os exemplos não foram extraídos das planilhas.</p></div><div className="request-controls"><label className="search"><Icon name="search" size={17}/><input placeholder="Buscar solicitação" value={search} onChange={e => setSearch(e.target.value)} aria-label="Buscar solicitação"/></label><select value={farmFilter} onChange={e => setFarmFilter(e.target.value)} aria-label="Filtrar por fazenda"><option value="ALL">Todas as fazendas</option>{purchaseFarms.map(farm => <option key={farm} value={farm}>{farm}</option>)}</select><select value={filter} onChange={e => setFilter(e.target.value)} aria-label="Filtrar por status"><option value="ALL">Todos os status</option>{statusOrder.map(s => <option key={s} value={s}>{statusLabels[s]}</option>)}</select></div></div><div className="table-wrap"><table><thead><tr><th>SOLICITAÇÃO</th><th>FAZENDA</th><th>DATA</th><th>VALOR</th><th>STATUS</th><th>ATUALIZAR</th></tr></thead><tbody>{visible.map(item => <tr key={item.id}><td><span className="item-title">{item.title}</span><span className="item-sub">#{String(item.id).padStart(4, '0')} · {item.category}{item.demo ? ' · Exemplo' : ''}</span></td><td>{item.farm}</td><td>{date(item.requestedAt)}</td><td className="amount">{money(item.amount)}</td><td><span className={`badge badge-${item.status.toLowerCase()}`}>{statusLabels[item.status]}</span></td><td>{canEdit ? <select className="status-select" value={item.status} onChange={e => changeStatus(item.id, e.target.value)} aria-label={`Atualizar status de ${item.title}`}>{statusOrder.map(s => <option key={s} value={s}>{statusLabels[s]}</option>)}</select> : <span className="muted" title="Seu perfil é somente leitura">—</span>}</td></tr>)}</tbody></table>{!loading && !visible.length && <div className="empty-table">Nenhuma solicitação encontrada.</div>}</div><div className="table-foot">Exibindo {visible.length} de {purchases.length} solicitações <span>Limite de 100 solicitações recentes</span></div></section>
         <footer>Intergado · Gestão rural</footer>
       </div>
     </main>}
 
     {showForm && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setShowForm(false) }}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="close" onClick={() => setShowForm(false)} aria-label="Fechar">×</button><div className="eyebrow">NOVA ENTRADA</div><h2 id="modal-title">Nova solicitação</h2><p>Registre uma necessidade de compra. Ela entrará como “Recebido”.</p><form onSubmit={create}><label>O que precisa ser comprado?<input name="title" required maxLength="160" placeholder="Ex.: Peças para irrigação"/></label><div className="form-grid"><label>Fazenda<input name="farm" required maxLength="100" placeholder="Ex.: Santa Cruz"/></label><label>Categoria<select name="category" required><option>Insumos</option><option>Manutenção</option><option>Pecuária</option><option>Combustível</option><option>Outros</option></select></label></div><div className="form-grid"><label>Solicitante<input name="requester" required maxLength="100" placeholder="Nome ou equipe"/></label><label>Valor estimado (R$)<input name="amount" type="number" min="0" step="0.01" defaultValue="0" required/></label></div><label>Fornecedor (opcional)<input name="supplier" maxLength="120" placeholder="Ainda não definido"/></label><div className="modal-actions"><button type="button" className="secondary" onClick={() => setShowForm(false)}>Cancelar</button><button type="submit" className="primary" disabled={saving}>{saving ? 'Salvando...' : 'Criar solicitação'}</button></div></form></div></div>}
   </div>
+}
+
+const dateTime = value => value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : '—'
+
+function Users({ user, onExpired }) {
+  const [items, setItems] = useState(null)
+  const [roles, setRoles] = useState([])
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState('')
+  const [form, setForm] = useState({ email: '', name: '', role: 'LEITOR' })
+  const fail = e => e instanceof Unauthorized ? onExpired() : setError(e.message)
+
+  async function load() {
+    try {
+      setError('')
+      const [list, roleList] = await Promise.all([readJson('/api/users'), readJson('/api/users/roles')])
+      setItems(list); setRoles(roleList)
+    } catch (e) { fail(e) }
+  }
+  useEffect(() => { load() }, [])
+
+  async function create(event) {
+    event.preventDefault()
+    setBusy('new'); setError(''); setNotice('')
+    try {
+      const created = await postJson('/api/users', form)
+      setItems(list => [...list, created])
+      setForm({ email: '', name: '', role: form.role })
+      setNotice(`${created.email} cadastrado. O acesso é pelo código enviado ao e-mail.`)
+    } catch (e) { fail(e) }
+    finally { setBusy('') }
+  }
+
+  async function change(target, changes, message) {
+    setBusy(target.email); setError(''); setNotice('')
+    try {
+      const updated = await readJson(`/api/users/${encodeURIComponent(target.email)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes) })
+      setItems(list => list.map(u => u.email === updated.email ? updated : u))
+      setNotice(message(updated))
+    } catch (e) { fail(e) }
+    finally { setBusy('') }
+  }
+
+  const active = items?.filter(u => u.active).length ?? 0
+  return <>
+    <div className="page-heading"><div><div className="eyebrow">CONFIGURAÇÃO</div><h1>Usuários</h1><p>Quem pode entrar no sistema e o que cada um pode fazer. O acesso é sempre pelo código enviado ao e-mail; não há senha.</p></div></div>
+    <section className="panel users-roles" aria-label="Perfis de acesso">
+      {roles.map(r => <div key={r.key}><strong>{r.label}</strong><span>{r.description}</span></div>)}
+    </section>
+    <section className="panel">
+      <div className="panel-head"><div><h2>Cadastrar usuário</h2><p>O usuário entra com o código enviado ao e-mail cadastrado.</p></div></div>
+      <form className="users-form" onSubmit={create}>
+        <label>E-mail<input type="email" required maxLength="254" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="nome@empresa.com.br"/></label>
+        <label>Nome (opcional)<input maxLength="100" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}/></label>
+        <label>Perfil<select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>{roles.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}</select></label>
+        <button type="submit" className="primary" disabled={busy === 'new'}><Icon name="plus" size={17}/> {busy === 'new' ? 'Salvando...' : 'Cadastrar'}</button>
+      </form>
+    </section>
+    {error && <div className="error" role="alert">{error} <button onClick={load}>Recarregar</button></div>}
+    {notice && <div className="saved users-notice" role="status">{notice}</div>}
+    <section className="panel requests">
+      <div className="panel-head"><div><h2>{items ? `${items.length} usuário(s), ${active} ativo(s)` : 'Usuários'}</h2><p>Administradores iniciais vêm do <code>AUTH_ADMIN_EMAILS</code> e podem ser desativados aqui por outro administrador. Ninguém altera o próprio perfil, e sempre resta ao menos um administrador ativo.</p></div></div>
+      {!items && !error && <p className="empty">Carregando...</p>}
+      {items && <div className="table-wrap"><table><thead><tr><th>USUÁRIO</th><th>PERFIL</th><th>SITUAÇÃO</th><th>ÚLTIMO ACESSO</th><th>ALTERADO</th></tr></thead><tbody>
+        {items.map(u => { const self = u.email === user.email; return <tr key={u.email} className={u.active ? '' : 'user-inactive'}>
+          <td><span className="item-title">{u.name || u.email}{self && ' (você)'}</span><span className="item-sub">{u.name ? `${u.email} · ` : ''}{u.fromEnv ? <span className="source source-env" title="Criado a partir de AUTH_ADMIN_EMAILS">.env</span> : `Cadastrado por ${u.createdBy || '—'}`}</span></td>
+          <td><select className="status-select" value={u.role} disabled={self || busy === u.email} title={self ? 'Peça a outro administrador para alterar o seu perfil' : undefined}
+            onChange={e => change(u, { role: e.target.value }, x => `${x.email} agora é ${roleLabels[x.role]}.`)} aria-label={`Perfil de ${u.email}`}>
+            {roles.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}</select></td>
+          <td><span className={`badge ${u.active ? 'badge-paid' : 'badge-inactive'}`}>{u.active ? 'Ativo' : 'Desativado'}</span>
+            {!self && <button type="button" className="link-button" disabled={busy === u.email}
+              onClick={() => change(u, { active: !u.active }, x => x.active ? `${x.email} pode entrar novamente.` : `${x.email} foi desativado e as sessões dele foram encerradas.`)}>{u.active ? 'Desativar' : 'Reativar'}</button>}</td>
+          <td>{dateTime(u.lastLoginAt)}</td>
+          <td><span className="item-sub">{dateTime(u.updatedAt || u.createdAt)}{u.updatedBy ? ` · ${u.updatedBy}` : ''}</span></td>
+        </tr> })}
+      </tbody></table></div>}
+    </section>
+  </>
 }
 
 const sourceLabels = { tela: 'Salvo na tela', '.env': 'Do .env', 'padrão': 'Padrão' }

@@ -27,10 +27,17 @@ CREATE TABLE IF NOT EXISTS farms (
   demo INTEGER NOT NULL DEFAULT 0 CHECK (demo IN (0,1))
 );
 
+-- Bases antigas recebem as colunas novas em UserService.migrate().
 CREATE TABLE IF NOT EXISTS users (
   email TEXT PRIMARY KEY CHECK (length(email) <= 254),
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  role TEXT NOT NULL DEFAULT 'LEITOR' CHECK (role IN ('LEITOR','OPERADOR','ADMIN')),
+  name TEXT CHECK (name IS NULL OR length(name) <= 100),
+  created_by TEXT,
+  updated_at TEXT,
+  updated_by TEXT,
+  last_login_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS login_codes (

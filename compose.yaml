@@ -4,7 +4,8 @@ services:
     restart: unless-stopped
     environment:
       DB_URL: jdbc:sqlite:/data/intergado.db
-      AUTH_ALLOWED_EMAILS: ${AUTH_ALLOWED_EMAILS:-}
+      # Administradores iniciais; AUTH_ALLOWED_EMAILS continua aceito como nome antigo
+      AUTH_ADMIN_EMAILS: ${AUTH_ADMIN_EMAILS:-${AUTH_ALLOWED_EMAILS:-}}
       AUTH_CODE_MINUTES: ${AUTH_CODE_MINUTES:-10}
       AUTH_SESSION_DAYS: ${AUTH_SESSION_DAYS:-7}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}

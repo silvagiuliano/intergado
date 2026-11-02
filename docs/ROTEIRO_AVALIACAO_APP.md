@@ -8,7 +8,7 @@ No terminal, a partir da raiz do projeto:
 
 ```bash
 cd /opt/devel/app/projeto_augusto
-cp -n .env.example .env   # preencha AUTH_ALLOWED_EMAILS e RESEND_API_KEY
+cp -n .env.example .env   # preencha AUTH_ADMIN_EMAILS e RESEND_API_KEY
 docker compose up --build -d
 docker compose ps
 ```
@@ -21,7 +21,9 @@ Para executar os três serviços diretamente em **modo de desenvolvimento**, sig
 
 ## 2. Entrar
 
-A primeira tela pede um e-mail. Informe um endereço listado em `AUTH_ALLOWED_EMAILS`, clique em **Enviar código** e digite o código de 6 dígitos recebido. Sem `RESEND_API_KEY`, o código aparece no log: `docker compose logs purchases-api | grep "Código de acesso"`. O e-mail logado e o botão **Sair** ficam no topo do painel.
+A primeira tela pede um e-mail. Informe um endereço listado em `AUTH_ADMIN_EMAILS` (ou cadastrado na tela **Usuários**), clique em **Enviar código** e digite o código de 6 dígitos recebido. Sem `RESEND_API_KEY`, o código aparece no log: `docker compose logs purchases-api | grep "Código de acesso"`. O e-mail logado, o perfil e o botão **Sair** ficam no topo do painel.
+
+Como administrador, abra **Usuários** no menu lateral e cadastre um segundo e-mail como **Leitor**. Ao entrar com ele, o botão **Nova solicitação**, a troca de status e os menus **Integrações** e **Usuários** não aparecem. Volte ao administrador e mude o perfil para **Operador**: na próxima ação, a escrita em compras passa a valer.
 
 ## 3. Conferir a tela inicial
 
@@ -76,7 +78,8 @@ docker compose logs --tail=100 purchases-api analytics-api web
 
 - **Tela não abre:** verifique se `web` está `Up` e se a porta 3000 está livre.
 - **Código não chega:** procure `Falha ao enviar` em `docker compose logs purchases-api`. Confira `RESEND_API_KEY` e se o remetente usa um domínio verificado; `onboarding@resend.dev` só entrega para o dono da conta Resend. Novo código só é gerado 60 segundos após o anterior.
-- **E-mail correto, mas nada acontece:** ele precisa estar em `AUTH_ALLOWED_EMAILS`, e o serviço precisa ser reiniciado depois de mudar a lista (`docker compose up -d`).
+- **E-mail correto, mas nada acontece:** ele precisa estar cadastrado e ativo na tela **Usuários** (ou em `AUTH_ADMIN_EMAILS`, criado na inicialização).
+- **Mensagem “Seu perfil não permite esta operação”:** o perfil do usuário não inclui a ação; um administrador altera na tela **Usuários**.
 - **Tela abre sem dados:** confira os logs de `purchases-api` e `analytics-api`.
 - **Dados iniciais não batem:** o volume SQLite persiste entre reinicializações. Verifique se já houve cadastros anteriores.
 
@@ -93,4 +96,4 @@ Esses comandos mantêm os dados. **Não use `docker compose down -v` se quiser p
 
 Observe clareza dos indicadores, nomes das categorias e status, facilidade de localizar uma compra, dados necessários no cadastro e fluxo real de aprovação da fazenda. Registre também quais campos precisam identificar fazenda, pasto, produto e responsável para integrar futuramente as planilhas.
 
-IA, OpenSearch, Realtec, perfis de permissão, recebimento de mensagens de WhatsApp e a importação completa das planilhas não fazem parte desta versão. O WhatsApp tem apenas envio de teste pelo Evolution API.
+IA, OpenSearch, Realtec, perfis por fazenda, recebimento de mensagens de WhatsApp e a importação completa das planilhas não fazem parte desta versão. O WhatsApp tem apenas envio de teste pelo Evolution API.

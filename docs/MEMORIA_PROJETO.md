@@ -27,7 +27,8 @@ O material de contexto inclui o [resumo executivo](01_Resumo_Executivo_Caso_Augu
 | API de leitura analítica | Quarkus 3.40.1.1, Java 17 e Maven Wrapper. Calcula indicadores a partir das compras. |
 | Persistência | Arquivo SQLite compartilhado pelas duas APIs. O Spring Boot cria tabelas e insere exemplos ausentes na inicialização. |
 | Documentação de API | Swagger/OpenAPI separado para Spring Boot e Quarkus. |
-| Login | Código de 6 dígitos enviado por e-mail via Resend para uma lista de e-mails autorizados. Sessão em cookie `HttpOnly` validada pelo Spring Boot e pelo Quarkus em todas as rotas `/api/*`. |
+| Login | Código de 6 dígitos enviado por e-mail via Resend para usuários ativos da tabela `users`. Sessão em cookie `HttpOnly` validada pelo Spring Boot e pelo Quarkus em todas as rotas `/api/*`. |
+| Usuários e perfis | Tela **Usuários** (React, `#usuarios`, só `ADMIN`) e API `/api/users`. Perfis `LEITOR` (consulta), `OPERADOR` (escreve compras e fazendas) e `ADMIN` (também usuários e integrações), verificados pelo `AuthFilter` do Spring Boot a cada requisição (`Role.required`). Administrador inicial por `AUTH_ADMIN_EMAILS`, desativável na tela. |
 | Integrações | Tela **Integrações** (React, `#integracoes`) e API `/api/integrations` para Evolution API (WhatsApp, fase de testes) e Resend. Valores da tela ficam em `integration_settings` e têm prioridade sobre o `.env`; segredos ficam só no `.env`. |
 | WhatsApp | Evolution API 2.3.7 em `compose.evolution.yaml`. Mensagem de teste e aviso automático de mudança de status, **apenas para números de teste e grupos cadastrados** (grupos escolhidos na tela com **Buscar grupos**). Detalhes em [EVOLUTION_API.md](EVOLUTION_API.md). |
 | HTTPS | Mesmo padrão do projeto `jev`: Caddy geral do host (`caddy.service`, um arquivo por projeto em `/etc/caddy/sites/`) na frente do Nginx publicado em `127.0.0.1:WEB_PORT`. Site gerado de `caddy/host/intergado.caddy.template` por `scripts/install-host-caddy.sh` (headers de segurança, HSTS só em domínio real, limite de 2 MB, log em `/var/log/caddy/intergado.log`). Alternativa sem Caddy no host: serviço `caddy` (`caddy:2-alpine`) no profile `standalone`, com `caddy/Caddyfile` (HTTPS) ou `caddy/Caddyfile.local` (HTTP). |
@@ -56,8 +57,11 @@ Navegador
 | [`web/nginx.conf`](../web/nginx.conf) | Encaminhamento de rotas no contêiner web. |
 | [`services/purchases-api/src/main/java/br/com/intergado/purchases/FarmController.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/FarmController.java) | CRUD parcial de fazendas: criar, listar, consultar e editar. |
 | [`services/purchases-api/src/main/java/br/com/intergado/purchases/PurchaseController.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/PurchaseController.java) | Cadastro, consulta, edição e mudança de status de compras. |
-| [`services/purchases-api/src/main/java/br/com/intergado/purchases/AuthController.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/AuthController.java) | Login: sincroniza a lista de e-mails, gera e valida códigos, cria e encerra sessões. |
-| [`services/purchases-api/src/main/java/br/com/intergado/purchases/AuthFilter.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/AuthFilter.java) | Exige sessão nas rotas `/api/*` do Spring Boot. |
+| [`services/purchases-api/src/main/java/br/com/intergado/purchases/AuthController.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/AuthController.java) | Login: gera e valida códigos, cria e encerra sessões, registra o último acesso; `/api/auth/me` devolve o perfil. |
+| [`services/purchases-api/src/main/java/br/com/intergado/purchases/AuthFilter.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/AuthFilter.java) | Exige sessão nas rotas `/api/*` do Spring Boot e o perfil mínimo de cada rota (`Role.required`); responde `401`/`403`. |
+| [`services/purchases-api/src/main/java/br/com/intergado/purchases/Role.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/Role.java) | Perfis `LEITOR`/`OPERADOR`/`ADMIN` e a regra de perfil mínimo por método e rota. |
+| [`services/purchases-api/src/main/java/br/com/intergado/purchases/UserService.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/UserService.java) | Migração da tabela `users`, administradores iniciais de `AUTH_ADMIN_EMAILS`, recuperação e regras de alteração. |
+| [`services/purchases-api/src/main/java/br/com/intergado/purchases/UserController.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/UserController.java) | Rotas `/api/users` (listar, perfis, cadastrar, alterar). |
 | [`services/purchases-api/src/main/java/br/com/intergado/purchases/ResendMailer.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/ResendMailer.java) | Envio do código pela API HTTP do Resend; sem chave, registra o código no log. |
 | [`services/purchases-api/src/main/java/br/com/intergado/purchases/IntegrationSettings.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/IntegrationSettings.java) | Definição dos campos de cada integração, validação e leitura tela > `.env` > padrão. |
 | [`services/purchases-api/src/main/java/br/com/intergado/purchases/IntegrationController.java`](../services/purchases-api/src/main/java/br/com/intergado/purchases/IntegrationController.java) | Rotas `/api/integrations` e ações do Evolution (estado, conectar, desconectar, teste). |
@@ -100,7 +104,7 @@ Os status disponíveis são `RECEIVED`, `QUOTING`, `AWAITING_APPROVAL`, `APPROVE
 
 ### Autenticação: `users`, `login_codes`, `sessions`
 
-`users` guarda `email` (minúsculo) e `active`. A cada inicialização, o Spring Boot marca como ativos apenas os e-mails de `AUTH_ALLOWED_EMAILS` e apaga as sessões dos demais. `login_codes` guarda o hash SHA-256 de `email:código`, tentativas, validade e uso; `sessions` guarda o hash SHA-256 do token do cookie, o e-mail e a validade. Nem códigos nem tokens ficam em texto puro no banco.
+`users` guarda `email` (minúsculo), `name`, `role` (`LEITOR`, `OPERADOR`, `ADMIN`), `active`, `created_by`, `updated_at`, `updated_by` e `last_login_at`. Bases antigas recebem as colunas em `UserService.migrate()`, e seus usuários viram `ADMIN` com `created_by = '.env'`. Na inicialização, `UserService.bootstrap()` cria como `ADMIN` os e-mails de `AUTH_ADMIN_EMAILS` que ainda não existem (sem alterar os existentes); se não houver administrador ativo, reativa esses e-mails como `ADMIN`; e apaga sessões de usuários inativos. Regras da tela: ninguém altera o próprio perfil ou desativa o próprio acesso, e sempre resta um administrador ativo. Desativar apaga as sessões do usuário. `login_codes` guarda o hash SHA-256 de `email:código`, tentativas, validade e uso; `sessions` guarda o hash SHA-256 do token do cookie, o e-mail e a validade. Nem códigos nem tokens ficam em texto puro no banco.
 
 Regras: código de 6 dígitos válido por `AUTH_CODE_MINUTES` (10), no máximo 5 tentativas, uso único; pedir novo código invalida os anteriores, e só um código é gerado a cada 60 segundos por e-mail. O pedido sempre responde `202` com a mesma mensagem, autorizado ou não. Sessões duram `AUTH_SESSION_DAYS` (7). Sessões vencidas e códigos com mais de um dia são apagados a cada login bem-sucedido.
 
@@ -114,7 +118,10 @@ Chave `(integration, name)`, `value`, `updated_at` e `updated_by` (e-mail da ses
 | --- | --- | --- | --- |
 | `POST` | `/api/auth/request-code` | Spring Boot | Pedir código (público; sempre `202`). |
 | `POST` | `/api/auth/verify` | Spring Boot | Validar código e criar cookie de sessão (público). |
-| `GET` | `/api/auth/me` | Spring Boot | E-mail da sessão atual. |
+| `GET` | `/api/auth/me` | Spring Boot | E-mail, nome e perfil da sessão atual. |
+| `GET`, `POST` | `/api/users` | Spring Boot | Listar e cadastrar usuários (`ADMIN`). |
+| `GET` | `/api/users/roles` | Spring Boot | Perfis e descrições (`ADMIN`). |
+| `PUT` | `/api/users/{email}` | Spring Boot | Alterar nome, perfil ou situação (`ADMIN`). |
 | `POST` | `/api/auth/logout` | Spring Boot | Encerrar sessão (público). |
 | `GET` | `/api/integrations` | Spring Boot | Configuração das integrações. |
 | `PUT` | `/api/integrations/{chave}` | Spring Boot | Salvar campos de uma integração. |
@@ -130,7 +137,7 @@ Chave `(integration, name)`, `value`, `updated_at` e `updated_by` (e-mail da ses
 | `PUT` | `/api/purchases/{id}/status` | Spring Boot | Alterar status. |
 | `GET` | `/api/analytics/overview` | Quarkus | Consultar indicadores agregados. |
 
-Todas as rotas `/api/*`, exceto as três públicas de login, respondem `401` sem sessão válida. O Swagger, o OpenAPI e os health checks continuam públicos; as chamadas feitas pelo Swagger usam o cookie do navegador, então é preciso entrar no painel antes.
+Todas as rotas `/api/*`, exceto as três públicas de login, respondem `401` sem sessão válida e `403` sem o perfil exigido: leituras para todos; `POST`/`PUT` em compras e fazendas a partir de `OPERADOR`; `/api/users` e `/api/integrations` (inclusive leitura) só `ADMIN`; outras escritas, `ADMIN` por padrão. O Quarkus só tem leitura e exige apenas sessão ativa. O Swagger, o OpenAPI e os health checks continuam públicos; as chamadas feitas pelo Swagger usam o cookie do navegador, então é preciso entrar no painel antes.
 
 Com as portas padrão, o Swagger de cadastros e compras fica em `http://localhost:5173/swagger-ui/index.html` no desenvolvimento ou `http://localhost:3000/swagger-ui/index.html` no Docker. O Swagger de indicadores fica nos mesmos hosts em `/q/swagger-ui`. Os contratos OpenAPI estão em `/v3/api-docs` e `/q/openapi`, respectivamente. As APIs Java também expõem `/actuator/health` e `/q/health/ready` em suas portas internas.
 
@@ -179,7 +186,7 @@ Abra `http://localhost:5173` ou `http://IP_DA_MAQUINA:5173`. Os scripts Java lee
 | `WEB_PORT` | `3000` | Porta publicada pelo Compose para o site. |
 | `PURCHASES_API_URL` | derivada do host/porta | Alvo opcional do proxy Vite para Spring Boot. |
 | `ANALYTICS_API_URL` | derivada do host/porta | Alvo opcional do proxy Vite para Quarkus. |
-| `AUTH_ALLOWED_EMAILS` | vazio | E-mails autorizados, separados por vírgula. Vazio: ninguém entra. |
+| `AUTH_ADMIN_EMAILS` | vazio | Administradores iniciais (criados se não existirem; reativados só se não houver administrador ativo). Nome antigo aceito: `AUTH_ALLOWED_EMAILS`. |
 | `RESEND_API_KEY` | vazio | Chave do Resend. Vazio: o código só aparece no log do Spring Boot. |
 | `AUTH_EMAIL_FROM` | `Intergado <onboarding@resend.dev>` | Remetente. O endereço de teste do Resend só entrega ao dono da conta. |
 | `AUTH_COOKIE_SECURE` | `false` | `true` em HTTPS. |
@@ -207,7 +214,9 @@ Abra `http://localhost:3000`, salvo ajuste em `WEB_PORT`. O volume `sqlite_data`
 | `No plugin found for prefix 'quarckus'` | Erro de digitação: o prefixo correto é `quarkus`. |
 | `BindException: Endereço já em uso` na porta 8080 | Já há outro processo escutando na porta. Conferir com `ss -ltnp` e encerrar a instância duplicada ou mudar `PURCHASES_API_PORT` em `.env`. O mesmo princípio vale para 8081 e 5173. |
 | Dashboard mostra “Serviços indisponíveis” | O React precisa das três respostas. Verificar Spring Boot, Quarkus, proxy e `GET /api/farms`, `/api/purchases`, `/api/analytics/overview`. |
-| Painel volta para o login ou APIs respondem `401` | Sessão ausente, vencida ou e-mail removido de `AUTH_ALLOWED_EMAILS`. Entrar de novo. |
+| Painel volta para o login ou APIs respondem `401` | Sessão ausente, vencida ou usuário desativado na tela **Usuários**. Entrar de novo. |
+| API responde `403` | O perfil do usuário não permite a operação; um administrador altera o perfil na tela **Usuários**. |
+| Nenhum administrador consegue entrar | Coloque um e-mail em `AUTH_ADMIN_EMAILS` e reinicie o `purchases-api`: sem administrador ativo, ele volta como `ADMIN`. |
 | Código não chega | Procurar `Falha ao enviar` no log do Spring Boot; conferir `RESEND_API_KEY` e domínio verificado do remetente. Sem chave, o código está no log (`Código de acesso para`). Novo código só após 60 s. |
 | WhatsApp: “não conectado” ou “Evolution API não respondeu” | Parear em Integrações → Conectar; conferir se `compose.evolution.yaml` está ativo e se `EVOLUTION_API_KEY` é a mesma nos dois lados. Ver [EVOLUTION_API.md](EVOLUTION_API.md#comportamento-e-diagnóstico). |
 | Caddy `standalone` não sobe: `port is already allocated` | As portas 80/443 estão em uso (Caddy do host ou, nesta máquina, `jev-caddy-1`). Tire `standalone` de `COMPOSE_PROFILES` ou ajuste `CADDY_HTTP_PORT`/`CADDY_HTTPS_PORT`. Let's Encrypt exige 80/443 livres. |
@@ -227,9 +236,9 @@ O login foi verificado em 30/10/2026 com os JARs compilados e um SQLite temporá
 2. **Modelo canônico:** relacionar compras à fazenda por identificador, cadastrar pastos/produtos/unidades e definir regras de mudança de nome. O vínculo atual usa texto.
 3. **Dashboards rurais reais:** histórico de movimentos, manejo, ração e insumos só devem ser publicados após as regras de negócio e qualidade de dados acima.
 4. **Interface de administração:** o React cadastra compras e altera status; cadastro/edição de fazendas e edição completa de compras são feitos pelo Swagger/API.
-5. **Operação para múltiplos usuários:** o login por e-mail e o HTTPS (Caddy) existem, mas todos os usuários autorizados têm o mesmo acesso. Faltam perfis/permissões, cadastro de usuários pela interface, limite de pedidos por IP, backup, migrações de schema e testes de integração; avaliar PostgreSQL quando a demonstração evoluir para uso compartilhado.
+5. **Operação para múltiplos usuários:** login por e-mail, HTTPS (Caddy), cadastro de usuários e perfis existem. Faltam limite de pedidos por IP, histórico completo de alterações de usuários (só o último `updated_by` fica gravado), perfis por fazenda, backup, migrações de schema e testes de integração; avaliar PostgreSQL quando a demonstração evoluir para uso compartilhado.
 6. **Integrações propostas:** o WhatsApp tem só a Fase 1 (envio de teste via Evolution API). Recebimento de mensagens, IA, OpenSearch, fornecedores e Realtec constam da documentação de oportunidades, mas não estão implementados.
-7. **Tela Integrações:** qualquer usuário logado pode alterá-la; falta perfil de administrador e histórico de alterações (só o último `updated_by` fica gravado).
+7. **Tela Integrações:** restrita a `ADMIN`; falta histórico de alterações (só o último `updated_by` fica gravado).
 
 As dúvidas de negócio que bloqueiam indicadores mais fortes estão listadas no fim de [AVALIACAO_PLANILHAS_DASHBOARDS.md](AVALIACAO_PLANILHAS_DASHBOARDS.md): confirmação de eventos realizados, definição do rendimento da ração, significado das diferenças de saldos, unidades dos produtos e identificadores oficiais de pastos/módulos.
 
@@ -246,5 +255,6 @@ As dúvidas de negócio que bloqueiam indicadores mais fortes estão listadas no
 9. Fase 1 do WhatsApp: Evolution API 2.3.7 em Compose separado, tela **Integrações** para cadastrar dados dos integradores (valor da tela > `.env` > padrão, segredos só no `.env`), mensagens apenas para números de teste e, depois, grupos escolhidos na tela (`WHATSAPP_GROUPS`).
 10. Adicionar Caddy na frente do Nginx para HTTPS, com endereço, modo de certificado e portas no `.env`; o Nginx e as rotas não mudaram.
 11. Adotar o padrão de borda do projeto `jev` (02/11/2026): Caddy geral do host com um arquivo por projeto em `/etc/caddy/sites/`, gerado do `.env` por `scripts/install-host-caddy.sh`; Nginx só em `127.0.0.1:WEB_PORT` (com `GET /health`); Caddy do projeto no profile `standalone` com `caddy/Caddyfile` e `caddy/Caddyfile.local`; `scripts/deploy-compose.sh` no lugar do `docker compose up` manual. As variáveis `CADDY_SITE_ADDRESS`, `CADDY_TLS` e `CADDY_LISTEN_HOST` saíram; os serviços ganharam `restart: unless-stopped`.
+12. Cadastro de usuários e perfis (02/11/2026): tela **Usuários** e `/api/users`, perfis `LEITOR`/`OPERADOR`/`ADMIN` verificados por rota no `AuthFilter`. `AUTH_ADMIN_EMAILS` (antes `AUTH_ALLOWED_EMAILS`, ainda aceito) deixa de sincronizar a lista: só cria os administradores iniciais e os recupera se não houver administrador ativo. Usuários são desativados, não apagados.
 
 Este arquivo é um retrato do projeto, não uma fonte alternativa de dados operacionais. Ao alterar APIs, modelo, configuração ou importação, atualize também esta memória, o [README](../README.md), o [roteiro](ROTEIRO_AVALIACAO_APP.md) e os diagramas afetados.

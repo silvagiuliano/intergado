@@ -20,7 +20,7 @@ Para publicar em um servidor com HTTPS, siga o [guia de deploy](docs/DEPLOY.md).
 | `sqlite_data` | Arquivo SQLite em volume Docker | Persistência compartilhada entre os serviços |
 | Caddy | Caddy geral do host (ou o serviço `caddy` do profile `standalone`) | HTTPS na frente do Nginx, com certificado automático e redirecionamento de HTTP |
 
-O Nginx encaminha `/api/auth`, `/api/integrations`, `/api/farms` e `/api/purchases` ao Spring Boot e `/api/analytics` ao Quarkus. Os serviços Java usam o mesmo arquivo; o Spring Boot cria as tabelas e os dados de demonstração antes de o Quarkus iniciar. Não é necessário instalar ou executar um servidor de banco de dados. Os dados iniciais são **apenas exemplos**, identificados no banco e no painel.
+O Nginx encaminha `/api/auth`, `/api/users`, `/api/integrations`, `/api/farms` e `/api/purchases` ao Spring Boot e `/api/analytics` ao Quarkus. Os serviços Java usam o mesmo arquivo; o Spring Boot cria as tabelas e os dados de demonstração antes de o Quarkus iniciar. Não é necessário instalar ou executar um servidor de banco de dados. Os dados iniciais são **apenas exemplos**, identificados no banco e no painel.
 
 O bloco **Fazendas** consulta `GET /api/farms`. A base nova contém Santa Cruz, Ilha Verde, Novo Mundo e Campo Verde, com o último saldo datado e o saldo Adepará de cada aba de `docs/planilhas/01_Controle_gado.xlsx`. Os registros iniciais são de 2021 e podem ser editados pela API. Ainda não há importação automática de todas as linhas das planilhas. As compras demonstrativas são independentes desses saldos. Em bases SQLite antigas, exemplos com a fazenda fictícia `Boa Vista` permanecem intactos; novas bases usam os nomes das quatro fazendas nos exemplos.
 
@@ -48,7 +48,7 @@ docker compose up --build -d
 
 Abra **http://localhost:3000** na própria máquina: o Nginx é publicado só em `127.0.0.1:WEB_PORT`. O acesso pela rede passa pelo Caddy (seção abaixo). Em servidor, prefira `./scripts/deploy-compose.sh`, que valida o `.env` e confere os health checks. Para ver logs: `docker compose logs -f`. Para parar: `docker compose down`. O arquivo SQLite persiste no volume `sqlite_data`; `docker compose down -v` também remove os dados.
 
-Para produção, ainda são necessários backup automático e perfis de permissão; esta entrega é um ambiente inicial de demonstração. O passo a passo para um servidor está em [docs/DEPLOY.md](docs/DEPLOY.md).
+Para produção, ainda são necessários backup automático e histórico de alterações; esta entrega é um ambiente inicial de demonstração. O passo a passo para um servidor está em [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Login por e-mail
 
@@ -56,7 +56,7 @@ O acesso usa um código de 6 dígitos enviado por e-mail pelo [Resend](https://r
 
 | Variável | Padrão | Uso |
 | --- | --- | --- |
-| `AUTH_ALLOWED_EMAILS` | vazio | E-mails autorizados, separados por vírgula. Vazio: ninguém entra |
+| `AUTH_ADMIN_EMAILS` | vazio | Administradores iniciais, separados por vírgula (ver [Usuários e perfis](#usuários-e-perfis)). Nome antigo aceito: `AUTH_ALLOWED_EMAILS` |
 | `RESEND_API_KEY` | vazio | Chave da API do Resend. Vazio: o código aparece só no log do Spring Boot |
 | `AUTH_EMAIL_FROM` | `Intergado <onboarding@resend.dev>` | Remetente; use um domínio verificado no Resend |
 | `AUTH_COOKIE_SECURE` | `false` | Use `true` quando o site estiver em HTTPS |
@@ -67,9 +67,27 @@ No `.env`, mantenha o remetente entre aspas, como em `AUTH_EMAIL_FROM="Intergado
 
 O remetente de teste `onboarding@resend.dev` só entrega para o e-mail dono da conta Resend. Para outros destinatários, verifique um domínio no Resend.
 
-A lista de e-mails é sincronizada com a tabela `users` a cada inicialização do Spring Boot; quem sai da lista perde as sessões abertas. O código expira em 10 minutos, aceita 5 tentativas e só pode ser usado uma vez; um novo código só é gerado 60 segundos após o anterior. A resposta ao pedido de código é sempre a mesma, para não revelar quais e-mails estão autorizados. Se o envio pelo Resend falhar, o erro aparece no log do Spring Boot.
+Só entram e-mails ativos da tabela `users`, cadastrados na tela **Usuários** ou criados por `AUTH_ADMIN_EMAILS`. O código expira em 10 minutos, aceita 5 tentativas e só pode ser usado uma vez; um novo código só é gerado 60 segundos após o anterior. A resposta ao pedido de código é sempre a mesma, para não revelar quais e-mails estão autorizados. Se o envio pelo Resend falhar, o erro aparece no log do Spring Boot.
 
 A sessão é um cookie `HttpOnly` (`intergado_session`, `SameSite=Lax`) guardado como hash na tabela `sessions`. O Spring Boot e o Quarkus validam esse cookie em todas as rotas `/api/*`, exceto `request-code`, `verify` e `logout`. O Swagger continua abrindo, mas as chamadas só funcionam depois do login no mesmo navegador.
+
+## Usuários e perfis
+
+Quem pode entrar e o que cada um pode fazer é definido na tela **Usuários** (menu lateral, só para administradores). Não há senha: o acesso é sempre pelo código enviado ao e-mail cadastrado.
+
+| Perfil | Pode |
+| --- | --- |
+| `LEITOR` | Consultar painel, fazendas, compras e indicadores |
+| `OPERADOR` | Também cadastrar e editar compras e fazendas e alterar status |
+| `ADMIN` | Também cadastrar usuários, mudar perfis, desativar acessos e editar integrações |
+
+- **Administrador inicial:** os e-mails de `AUTH_ADMIN_EMAILS` são criados como `ADMIN` na inicialização, se ainda não existirem. Depois disso, a tela manda: outro administrador pode mudar o perfil ou desativar esse e-mail, e o `.env` não o reativa.
+- **Recuperação:** se não restar nenhum administrador ativo, os e-mails de `AUTH_ADMIN_EMAILS` voltam a ser administradores ativos no próximo reinício do `purchases-api`.
+- **Proteções:** ninguém muda o próprio perfil nem desativa o próprio acesso, e o último administrador ativo não pode ser rebaixado nem desativado.
+- **Efeito imediato:** o perfil é lido a cada requisição; desativar um usuário encerra as sessões dele. Sem permissão, a API responde `403`.
+- Usuários são desativados, não apagados, e ficam registrados quem criou, quem alterou por último e o último acesso.
+
+Bases criadas antes dos perfis são migradas na inicialização: os usuários existentes passam a ser `ADMIN`, como era o acesso deles até então. `AUTH_ALLOWED_EMAILS`, o nome antigo da variável, continua aceito.
 
 ## HTTPS com Caddy
 
@@ -126,7 +144,7 @@ Os scripts criam `data/` e leem `.env` da raiz. Você pode alterar os endereços
 | `ANALYTICS_API_PORT` | `8081` | Porta do Quarkus em dev |
 | `WEB_PORT` | `3000` | Porta do site em Docker Compose |
 
-O Vite redireciona `/api/auth`, `/api/integrations`, `/api/farms`, `/api/purchases` e `/api/analytics` para as portas configuradas. Se as APIs estiverem em outra máquina, defina também `PURCHASES_API_URL` e `ANALYTICS_API_URL` em `.env`. Para acessar pela rede, abra `http://IP_DA_MAQUINA:5173`. Ambos os serviços Java usam `data/intergado.db` por padrão, relativo à raiz do projeto. Em Docker, o arquivo fica no volume `sqlite_data`.
+O Vite redireciona `/api/auth`, `/api/users`, `/api/integrations`, `/api/farms`, `/api/purchases` e `/api/analytics` para as portas configuradas. Se as APIs estiverem em outra máquina, defina também `PURCHASES_API_URL` e `ANALYTICS_API_URL` em `.env`. Para acessar pela rede, abra `http://IP_DA_MAQUINA:5173`. Ambos os serviços Java usam `data/intergado.db` por padrão, relativo à raiz do projeto. Em Docker, o arquivo fica no volume `sqlite_data`.
 
 Se o painel mostrar **“Serviços indisponíveis”**, confirme que os dois serviços estão ativos: `curl http://127.0.0.1:8080/actuator/health` e `curl http://127.0.0.1:8081/q/health/ready` (ajuste as portas se as alterou).
 
@@ -138,7 +156,7 @@ O Quarkus exige Maven 3.9 ou superior. `./dev-quarkus.sh` usa o Maven Wrapper do
 | --- | --- | --- |
 | POST | `/api/auth/request-code` | Envia código para `{ "email": "..." }` se o e-mail estiver autorizado (sempre `202`) |
 | POST | `/api/auth/verify` | Valida `{ "email": "...", "code": "123456" }` e cria o cookie de sessão |
-| GET | `/api/auth/me` | E-mail da sessão atual |
+| GET | `/api/auth/me` | E-mail, nome e perfil da sessão atual |
 | POST | `/api/auth/logout` | Encerra a sessão |
 | GET | `/api/purchases` | Até 100 solicitações recentes; aceita `?status=RECEIVED` |
 | GET | `/api/purchases/{id}` | Detalhe de uma solicitação |
@@ -149,14 +167,18 @@ O Quarkus exige Maven 3.9 ou superior. `./dev-quarkus.sh` usa o Maven Wrapper do
 | GET | `/api/farms/{id}` | Detalhe de uma fazenda |
 | POST | `/api/farms` | Cadastra fazenda, data, saldos e fontes |
 | PUT | `/api/farms/{id}` | Edita a fazenda; ao renomeá-la, atualiza o nome nas compras associadas |
-| GET | `/api/integrations` | Configuração das integrações (Evolution, Resend) |
+| GET | `/api/users` | Usuários, perfis e situação (`ADMIN`) |
+| GET | `/api/users/roles` | Perfis disponíveis e o que cada um pode (`ADMIN`) |
+| POST | `/api/users` | Cadastra `{ "email", "name", "role" }` (`ADMIN`) |
+| PUT | `/api/users/{email}` | Altera `name`, `role` ou `active` (`ADMIN`) |
+| GET | `/api/integrations` | Configuração das integrações (Evolution, Resend) (`ADMIN`) |
 | PUT | `/api/integrations/{chave}` | Salva campos de uma integração |
 | GET/POST | `/api/integrations/evolution/...` | `connection`, `connect`, `groups`, `logout` e `test` do WhatsApp |
 | GET | `/api/analytics/overview` | Totais, valores e séries para o dashboard |
 | GET | `/actuator/health` | Saúde do Spring Boot |
 | GET | `/q/health/ready` | Prontidão do Quarkus |
 
-As demais rotas `/api/*` respondem `401` sem sessão válida.
+As demais rotas `/api/*` respondem `401` sem sessão válida e `403` quando o perfil não permite: leituras para todos, escrita em compras e fazendas a partir de `OPERADOR`, usuários e integrações só `ADMIN`.
 
 Status disponíveis: `RECEIVED`, `QUOTING`, `AWAITING_APPROVAL`, `APPROVED`, `ORDERED`, `DELIVERED`, `PAID`.
 
