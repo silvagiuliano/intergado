@@ -261,7 +261,8 @@ Todos os contêineres sobem sozinhos após reiniciar o servidor (`restart: unles
 | `502 Bad Gateway` no domínio | O Nginx não responde em `127.0.0.1:WEB_PORT`: `docker compose ps`, `curl http://127.0.0.1:3000/health`; se mudou `WEB_PORT`, rode `./scripts/install-host-caddy.sh` |
 | Domínio não responde / outro site aparece | Site não instalado ou divergente: `./scripts/deploy-compose.sh --check` e `./scripts/install-host-caddy.sh`. Confira `import /etc/caddy/sites/*.caddy` no `/etc/caddy/Caddyfile` |
 | `CADDY_DOMAIN=localhost ... capturaria todos os projetos` | Use um nome próprio (`intergado.localhost`) ou o domínio real |
-| `port is already allocated` no `caddy` do Compose | `standalone` ativo junto com o Caddy do host. Tire `standalone` de `COMPOSE_PROFILES` e rode `docker compose rm -sf caddy` |
+| `port is already allocated` no `caddy` do Compose | `standalone` ativo junto com o Caddy do host (ou outro projeto nas mesmas portas). Tire `standalone` de `COMPOSE_PROFILES` e rode `docker compose rm -sf caddy`, ou use outras portas com `Caddyfile.local` ([testes em HTTP](#testes-em-http-com-80443-ocupadas)) |
+| `docker compose ps` não mostra o Evolution | Falta `COMPOSE_FILE=compose.yaml:compose.evolution.yaml` no `.env` |
 | Caddy não obtém certificado | DNS não aponta para o servidor, porta 80/443 fechada no firewall ou na nuvem, ou limite de emissões do Let's Encrypt. Veja `journalctl -u caddy` |
 | Navegador avisa de certificado inválido | Nome `*.localhost` com a CA interna: confie na CA (seção 1.1, passo 5) |
 | Login volta para a tela de e-mail | `AUTH_COOKIE_SECURE=true` acessando por HTTP, ou e-mail fora de `AUTH_ALLOWED_EMAILS` |
@@ -284,17 +285,61 @@ Todos os contêineres sobem sozinhos após reiniciar o servidor (`restart: unles
 
 ## Caddy do projeto (standalone)
 
-Para rodar o Intergado sozinho, sem Caddy no host (demonstração, máquina de desenvolvimento). Não use junto com o Caddy do host: os dois disputam as portas 80/443.
+Para rodar o Intergado sozinho, sem Caddy no host (demonstração, máquina de desenvolvimento ou de testes). O serviço `caddy` do Compose só sobe com `COMPOSE_PROFILES=standalone`. Não use junto com o Caddy do host: os dois disputam as portas 80/443. Arquivos e detalhes em [caddy/README.md](../caddy/README.md).
+
+| Arquivo (`CADDYFILE`) | Atende | Quando usar |
+| --- | --- | --- |
+| `./caddy/Caddyfile` (padrão) | HTTPS em `CADDY_DOMAIN`, HTTP redireciona | Servidor com domínio e portas 80/443 livres |
+| `./caddy/Caddyfile.local` | Só HTTP, qualquer host, porta `CADDY_HTTP_PORT` | Testes na rede local, sem certificado |
+
+### HTTPS com domínio
 
 ```env
 COMPOSE_PROFILES=standalone
-CADDY_DOMAIN=intergado.seudominio.com.br   # ou localhost
-CADDYFILE=./caddy/Caddyfile                # ./caddy/Caddyfile.local: HTTP sem TLS
+CADDY_DOMAIN=intergado.seudominio.com.br   # ou localhost (certificado interno)
+CADDYFILE=./caddy/Caddyfile
 CADDY_HTTP_PORT=80
 CADDY_HTTPS_PORT=443
+AUTH_COOKIE_SECURE=true
 ```
 
-Depois, `./scripts/deploy-compose.sh` (recria o Caddy após o Nginx e confere `/caddy-health` e `/health`). Logs: `docker compose logs -f caddy`. Certificados nos volumes `caddy_data` e `caddy_config`. Arquivos e detalhes em [caddy/README.md](../caddy/README.md).
+O Let's Encrypt valida pela porta 80: em outras portas, só funciona `CADDY_DOMAIN=localhost`, com o certificado interno (o navegador alerta; `curl -k`).
+
+### Testes em HTTP com 80/443 ocupadas
+
+É a configuração da máquina de desenvolvimento, onde 80/443 já estão com o Caddy de outro projeto (`jev-caddy-1`) e não há Caddy no host:
+
+```env
+COMPOSE_PROFILES=standalone
+CADDY_DOMAIN=intergado.seudominio.com.br   # não muda o que é servido com Caddyfile.local
+WEB_PORT=3000
+CADDYFILE=./caddy/Caddyfile.local
+CADDY_HTTP_PORT=8088
+CADDY_HTTPS_PORT=8443                      # publicada, mas sem uso com Caddyfile.local
+AUTH_COOKIE_SECURE=false                   # obrigatório em HTTP: com true o login não grava a sessão
+# Evolution junto em todos os comandos docker compose e no deploy:
+COMPOSE_FILE=compose.yaml:compose.evolution.yaml
+```
+
+| Endereço | Quem acessa |
+| --- | --- |
+| `http://<ip-da-máquina>:8088` | Qualquer computador da rede, pelo Caddy do projeto |
+| `http://localhost:3000` | Só a própria máquina, direto no Nginx |
+| `http://localhost:8090/manager` | Só a própria máquina, painel do Evolution |
+
+### Subir e conferir
+
+```bash
+./scripts/deploy-compose.sh --check   # valida o .env sem mexer nos contêineres
+./scripts/deploy-compose.sh           # ou --skip-build para reaproveitar as imagens
+curl -s http://127.0.0.1:8088/caddy-health   # {"status":"ok","service":"caddy"}
+curl -s http://127.0.0.1:8088/health         # {"status":"ok","service":"web"}
+docker compose logs -f caddy
+```
+
+O deploy recria o Caddy depois do Nginx e confere `/caddy-health` e `/health` pela porta publicada. Com `Caddyfile`, também testa o HTTPS do domínio (falha vira aviso, porque depende de DNS e portas externas). Certificados ficam nos volumes `caddy_data` e `caddy_config`.
+
+Para migrar uma máquina do modo standalone para o Caddy do host: tire `standalone` de `COMPOSE_PROFILES`, rode `docker compose rm -sf caddy`, defina um `CADDY_DOMAIN` próprio e siga as seções [1.1](#11-caddy-do-host-padrão) e [4](#4-subir-a-aplicação-e-instalar-o-site).
 
 ## Limitações
 
