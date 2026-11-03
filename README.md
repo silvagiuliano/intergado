@@ -22,7 +22,7 @@ Para publicar em um servidor com HTTPS, siga o [guia de deploy](docs/DEPLOY.md).
 
 O Nginx encaminha `/api/auth`, `/api/users`, `/api/integrations`, `/api/farms` e `/api/purchases` ao Spring Boot e `/api/analytics` ao Quarkus. Os serviços Java usam o mesmo arquivo; o Spring Boot cria as tabelas e os dados de demonstração antes de o Quarkus iniciar. Não é necessário instalar ou executar um servidor de banco de dados. Os dados iniciais são **apenas exemplos**, identificados no banco e no painel.
 
-O bloco **Fazendas** consulta `GET /api/farms`. A base nova contém Santa Cruz, Ilha Verde, Novo Mundo e Campo Verde, com o último saldo datado e o saldo Adepará de cada aba de `docs/planilhas/01_Controle_gado.xlsx`. Os registros iniciais são de 2021 e podem ser editados pela API. Ainda não há importação automática de todas as linhas das planilhas. As compras demonstrativas são independentes desses saldos. Em bases SQLite antigas, exemplos com a fazenda fictícia `Boa Vista` permanecem intactos; novas bases usam os nomes das quatro fazendas nos exemplos.
+O bloco **Fazendas** consulta `GET /api/farms`. A base nova contém Santa Cruz, Ilha Verde, Novo Mundo e Campo Verde, com o último saldo datado e o saldo Adepará de cada aba de `docs/planilhas/01_Controle_gado.xlsx`. Os registros iniciais são de 2021. Operadores e administradores cadastram e editam fazendas no próprio painel (**Nova fazenda** e **Editar** nos cartões) ou pela API. Ainda não há importação automática de todas as linhas das planilhas. As compras demonstrativas são independentes desses saldos. Em bases SQLite antigas, exemplos com a fazenda fictícia `Boa Vista` permanecem intactos; novas bases usam os nomes das quatro fazendas nos exemplos.
 
 ## Integrações e WhatsApp (testes)
 

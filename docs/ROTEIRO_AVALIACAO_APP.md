@@ -23,7 +23,7 @@ Para executar os três serviços diretamente em **modo de desenvolvimento**, sig
 
 A primeira tela pede um e-mail. Informe um endereço listado em `AUTH_ADMIN_EMAILS` (ou cadastrado na tela **Usuários**), clique em **Enviar código** e digite o código de 6 dígitos recebido. Sem `RESEND_API_KEY`, o código aparece no log: `docker compose logs purchases-api | grep "Código de acesso"`. O e-mail logado, o perfil e o botão **Sair** ficam no topo do painel.
 
-Como administrador, abra **Usuários** no menu lateral e cadastre um segundo e-mail como **Leitor**. Ao entrar com ele, o botão **Nova solicitação**, a troca de status e os menus **Integrações** e **Usuários** não aparecem. Volte ao administrador e mude o perfil para **Operador**: na próxima ação, a escrita em compras passa a valer.
+Como administrador, abra **Usuários** no menu lateral e cadastre um segundo e-mail como **Leitor**. Ao entrar com ele, os botões **Nova solicitação**, **Nova fazenda** e **Editar**, a troca de status e os menus **Integrações** e **Usuários** não aparecem. Volte ao administrador e mude o perfil para **Operador**: na próxima ação, a escrita em compras passa a valer.
 
 ## 3. Conferir a tela inicial
 
@@ -48,8 +48,11 @@ Se você já criou solicitações, os valores serão diferentes. O botão de atu
 4. Na coluna **Atualizar**, mude o status dessa linha para **Em cotação**. Confirme que o selo muda. Experimente o filtro **Em cotação**.
 5. Atualize a página do navegador. O registro e o status devem continuar lá, pois ficam salvos no arquivo SQLite.
 6. Volte ao topo e confira se os cartões e a distribuição por categoria refletem o item criado.
+7. Clique no lápis ao lado do status da linha criada. Mude o valor para `300,00` e o fornecedor para `Teste`, salve e confira a linha e o valor estimado. O status não muda nessa janela.
+8. No bloco **Fazendas**, clique em **Nova fazenda** e cadastre `Fazenda Teste` com saldo `10`. Tente cadastrar de novo o nome `Santa Cruz`: a janela mostra “Já existe uma fazenda com este nome”.
+9. Em **Editar** no cartão de `Fazenda Teste`, troque o nome para `Fazenda Teste 2`. Solicitações ligadas ao nome antigo passam para o novo nome. Na **Nova solicitação**, a fazenda é escolhida entre as cadastradas.
 
-O cadastro de teste permanece no banco. Esta versão não tem exclusão pela interface; use um título que deixe claro que se trata de teste.
+O cadastro de teste permanece no banco. Esta versão não exclui solicitações nem fazendas, nem pela interface nem pela API; use um título que deixe claro que se trata de teste.
 
 ## 5. Conferir as APIs e o Swagger
 

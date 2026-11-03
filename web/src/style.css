@@ -16,3 +16,12 @@
 .user-inactive td{opacity:.6}
 .link-button{background:none;border:0;padding:0 0 0 10px;color:#3b8c60;font-size:12px;font-weight:600;cursor:pointer}
 .link-button:disabled{opacity:.5;cursor:default}
+.farms-heading .farm-new{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.farm-actions{margin-top:13px;border-top:1px solid #eef2eb;padding-top:10px}
+.farm-actions .link-button,.row-actions{display:inline-flex;align-items:center;gap:5px}
+.farm-actions .link-button{padding:0}
+.icon-button{display:grid;place-items:center;width:28px;height:28px;border:1px solid #e3eae1;border-radius:7px;background:#fff;color:#55705a}
+.icon-button:hover{background:#f0f5ed}
+.field-help{font-weight:400;color:#8a998d;font-size:10px}
+.modal .error{margin:0}
+@media(max-width:760px){.farms-heading .farm-new{margin-top:12px}}

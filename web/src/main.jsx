@@ -24,6 +24,7 @@ const Icon = ({ name, size = 20 }) => {
     logout: <><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l5-5-5-5M15 12H4"/></>,
     plug: <><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v4"/></>,
     leaf: <><path d="M20 4c-9 0-15 3-15 11a5 5 0 0 0 5 5c8 0 11-6 10-16Z"/><path d="M4 21c3-7 7-10 13-13"/></>,
+    edit: <><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></>,
     users: <><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/></>,
   }
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
@@ -48,7 +49,11 @@ const roleLabels = { LEITOR: 'Leitor', OPERADOR: 'Operador', ADMIN: 'Administrad
 const adminViews = { '#integracoes': 'integrations', '#usuarios': 'users' }
 const viewFor = (hash, role) => role === 'ADMIN' && adminViews[hash] || 'dashboard'
 
-const postJson = (url, body) => readJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+const sendJson = method => (url, body) => readJson(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+const postJson = sendJson('POST')
+const putJson = sendJson('PUT')
+const categories = ['Insumos', 'Manutenção', 'Pecuária', 'Combustível', 'Outros']
+const today = () => new Date().toLocaleDateString('sv-SE')
 
 function Root() {
   const [user, setUser] = useState(undefined)
@@ -129,8 +134,8 @@ function App({ user, onLogout, onExpired }) {
   const [filter, setFilter] = useState('ALL')
   const [farmFilter, setFarmFilter] = useState('ALL')
   const [search, setSearch] = useState('')
-  const [showForm, setShowForm] = useState(false)
-  const [saving, setSaving] = useState(false)
+  // null, or { kind: 'purchase' | 'farm', item } where item is undefined for a new record.
+  const [editing, setEditing] = useState(null)
   const isAdmin = user.role === 'ADMIN'
   const canEdit = user.role === 'ADMIN' || user.role === 'OPERADOR'
   const [view, setView] = useState(() => viewFor(window.location.hash, user.role))
@@ -161,17 +166,9 @@ function App({ user, onLogout, onExpired }) {
   ), [purchases, filter, farmFilter, search])
   const purchaseFarms = useMemo(() => [...new Set(purchases.map(item => item.farm))].sort((a, b) => a.localeCompare(b, 'pt-BR')), [purchases])
 
-  async function create(event) {
-    event.preventDefault()
-    const fields = Object.fromEntries(new FormData(event.currentTarget))
-    fields.amount = Number(fields.amount)
-    setSaving(true)
-    try {
-      await postJson('/api/purchases', fields)
-      setShowForm(false)
-      await load()
-    } catch (e) { e instanceof Unauthorized ? onExpired() : setError(e.message) }
-    finally { setSaving(false) }
+  async function saved() {
+    setEditing(null)
+    await load()
   }
 
   async function changeStatus(id, status) {
@@ -204,19 +201,20 @@ function App({ user, onLogout, onExpired }) {
     <main id="visao" className="content">
       <header className="topbar"><div className="breadcrumbs">Operação <span>/</span> Fazendas <span>/</span> <strong>Visão geral</strong></div><div className="topbar-right"><span className="live-dot"/> Compras atualizadas ao abrir <button className="refresh" onClick={load} title="Atualizar dados" aria-label="Atualizar dados"><Icon name="refresh" size={17}/></button><span className="user-email" title={roleLabels[user.role]}>{user.email} · {roleLabels[user.role]}</span><button className="refresh logout" onClick={onLogout} title="Sair" aria-label="Sair"><Icon name="logout" size={17}/></button></div></header>
       <div className="page">
-        <div className="page-heading"><div><div className="eyebrow">INTELIGÊNCIA OPERACIONAL</div><h1>Visão das fazendas</h1><p>Consulte o histórico do rebanho por fazenda e acompanhe as compras da aplicação.</p></div>{canEdit && <button className="primary" onClick={() => setShowForm(true)}><Icon name="plus" size={19}/> Nova solicitação</button>}</div>
+        <div className="page-heading"><div><div className="eyebrow">INTELIGÊNCIA OPERACIONAL</div><h1>Visão das fazendas</h1><p>Consulte o histórico do rebanho por fazenda e acompanhe as compras da aplicação.</p></div>{canEdit && <button className="primary" onClick={() => setEditing({ kind: 'purchase' })}><Icon name="plus" size={19}/> Nova solicitação</button>}</div>
         {error && <div className="error" role="alert">{error} <button onClick={load}>Tentar novamente</button></div>}
         {overview?.demoData && <div className="demo-note">As solicitações de compra são exemplos, não dados importados das planilhas. Bases criadas antes desta atualização podem conter a fazenda ilustrativa “Boa Vista”; esses registros foram preservados.</div>}
         <section id="fazendas" className="farms-section" aria-labelledby="farms-title">
-          <div className="farms-heading"><div><div className="eyebrow">CADASTRO DE FAZENDAS</div><h2 id="farms-title">{farms.length} fazendas cadastradas</h2><p>Os quatro registros iniciais mostram saldos históricos das planilhas de 2021. Cadastre e atualize fazendas pela API de cadastros.</p></div><span className="small-tag">Dados via API</span></div>
+          <div className="farms-heading"><div><div className="eyebrow">CADASTRO DE FAZENDAS</div><h2 id="farms-title">{farms.length} fazendas cadastradas</h2><p>Os quatro registros iniciais mostram saldos históricos das planilhas de 2021.{canEdit ? ' Cadastre novas fazendas e atualize os saldos por aqui.' : ''}</p></div>{canEdit ? <button className="secondary farm-new" onClick={() => setEditing({ kind: 'farm' })}><Icon name="plus" size={16}/> Nova fazenda</button> : <span className="small-tag">Somente leitura</span>}</div>
           <div className="farm-grid">{farms.map(farm => <article className="farm-card" key={farm.id}>
             <div className="farm-card-head"><h3>{farm.name}</h3><span>Data do saldo: {farm.balanceDate.split('-').reverse().join('/')}</span></div>
             <div className="farm-balance"><strong>{integer(farm.herdBalance)}</strong><span>cabeças · saldo registrado</span></div>
             <div className="farm-adepara">Saldo Adepará registrado: <strong>{integer(farm.adeparaBalance)}</strong></div>
             <div className="farm-sources" aria-label={`Fontes de ${farm.name}`}>{farm.sources.split(',').map(source => source.trim()).filter(Boolean).map(source => <span key={source}>{source}</span>)}</div>
+            {canEdit && <div className="farm-actions"><button type="button" className="link-button" onClick={() => setEditing({ kind: 'farm', item: farm })} aria-label={`Editar ${farm.name}`}><Icon name="edit" size={14}/> Editar</button></div>}
           </article>)}</div>
           {farms.length === 0 && !loading && <p className="empty">Nenhuma fazenda cadastrada.</p>}
-          <p className="farm-source-note">Os quatro saldos iniciais vieram de <code>01_Controle_gado.xlsx</code>, com datas diferentes. A comparação com Adepará precisa de conciliação. Novos valores são inseridos pela API; a importação automática das planilhas ainda não está disponível.</p>
+          <p className="farm-source-note">Os quatro saldos iniciais vieram de <code>01_Controle_gado.xlsx</code>, com datas diferentes. A comparação com Adepará precisa de conciliação. Novos valores são inseridos pela tela ou pela API; a importação automática das planilhas ainda não está disponível.</p>
         </section>
         <div className="eyebrow purchase-eyebrow">COMPRAS · DADOS DA APLICAÇÃO</div>
         <section className="metrics" aria-label="Indicadores principais">
@@ -231,13 +229,107 @@ function App({ user, onLogout, onExpired }) {
           <div className="panel category"><div className="panel-head"><div><h2>Por categoria</h2><p>Valor estimado das solicitações</p></div></div><div className="category-list">{(overview?.byCategory || []).map((group, i) => <div className="category-row" key={group.name}><div className="category-line"><span><i className={`category-dot dot-${i % 4}`}/>{group.name}</span><strong>{money(group.amount)}</strong></div><div className="progress"><span style={{width: `${Number(group.amount) / maxCategory * 100}%`}}/></div></div>)}{overview && !overview.byCategory.length && <p className="empty">Sem dados no período.</p>}</div></div>
         </section>
 
-        <section id="solicitacoes" className="panel requests"><div className="panel-head request-head"><div><h2>Solicitações recentes</h2><p>Compras da aplicação; os exemplos não foram extraídos das planilhas.</p></div><div className="request-controls"><label className="search"><Icon name="search" size={17}/><input placeholder="Buscar solicitação" value={search} onChange={e => setSearch(e.target.value)} aria-label="Buscar solicitação"/></label><select value={farmFilter} onChange={e => setFarmFilter(e.target.value)} aria-label="Filtrar por fazenda"><option value="ALL">Todas as fazendas</option>{purchaseFarms.map(farm => <option key={farm} value={farm}>{farm}</option>)}</select><select value={filter} onChange={e => setFilter(e.target.value)} aria-label="Filtrar por status"><option value="ALL">Todos os status</option>{statusOrder.map(s => <option key={s} value={s}>{statusLabels[s]}</option>)}</select></div></div><div className="table-wrap"><table><thead><tr><th>SOLICITAÇÃO</th><th>FAZENDA</th><th>DATA</th><th>VALOR</th><th>STATUS</th><th>ATUALIZAR</th></tr></thead><tbody>{visible.map(item => <tr key={item.id}><td><span className="item-title">{item.title}</span><span className="item-sub">#{String(item.id).padStart(4, '0')} · {item.category}{item.demo ? ' · Exemplo' : ''}</span></td><td>{item.farm}</td><td>{date(item.requestedAt)}</td><td className="amount">{money(item.amount)}</td><td><span className={`badge badge-${item.status.toLowerCase()}`}>{statusLabels[item.status]}</span></td><td>{canEdit ? <select className="status-select" value={item.status} onChange={e => changeStatus(item.id, e.target.value)} aria-label={`Atualizar status de ${item.title}`}>{statusOrder.map(s => <option key={s} value={s}>{statusLabels[s]}</option>)}</select> : <span className="muted" title="Seu perfil é somente leitura">—</span>}</td></tr>)}</tbody></table>{!loading && !visible.length && <div className="empty-table">Nenhuma solicitação encontrada.</div>}</div><div className="table-foot">Exibindo {visible.length} de {purchases.length} solicitações <span>Limite de 100 solicitações recentes</span></div></section>
+        <section id="solicitacoes" className="panel requests"><div className="panel-head request-head"><div><h2>Solicitações recentes</h2><p>Compras da aplicação; os exemplos não foram extraídos das planilhas.</p></div><div className="request-controls"><label className="search"><Icon name="search" size={17}/><input placeholder="Buscar solicitação" value={search} onChange={e => setSearch(e.target.value)} aria-label="Buscar solicitação"/></label><select value={farmFilter} onChange={e => setFarmFilter(e.target.value)} aria-label="Filtrar por fazenda"><option value="ALL">Todas as fazendas</option>{purchaseFarms.map(farm => <option key={farm} value={farm}>{farm}</option>)}</select><select value={filter} onChange={e => setFilter(e.target.value)} aria-label="Filtrar por status"><option value="ALL">Todos os status</option>{statusOrder.map(s => <option key={s} value={s}>{statusLabels[s]}</option>)}</select></div></div><div className="table-wrap"><table><thead><tr><th>SOLICITAÇÃO</th><th>FAZENDA</th><th>DATA</th><th>VALOR</th><th>STATUS</th><th>ATUALIZAR</th></tr></thead><tbody>{visible.map(item => <tr key={item.id}><td><span className="item-title">{item.title}</span><span className="item-sub">#{String(item.id).padStart(4, '0')} · {item.category}{item.demo ? ' · Exemplo' : ''}</span></td><td>{item.farm}</td><td>{date(item.requestedAt)}</td><td className="amount">{money(item.amount)}</td><td><span className={`badge badge-${item.status.toLowerCase()}`}>{statusLabels[item.status]}</span></td><td>{canEdit ? <div className="row-actions"><select className="status-select" value={item.status} onChange={e => changeStatus(item.id, e.target.value)} aria-label={`Atualizar status de ${item.title}`}>{statusOrder.map(s => <option key={s} value={s}>{statusLabels[s]}</option>)}</select><button type="button" className="icon-button" onClick={() => setEditing({ kind: 'purchase', item })} title="Editar solicitação" aria-label={`Editar ${item.title}`}><Icon name="edit" size={15}/></button></div> : <span className="muted" title="Seu perfil é somente leitura">—</span>}</td></tr>)}</tbody></table>{!loading && !visible.length && <div className="empty-table">Nenhuma solicitação encontrada.</div>}</div><div className="table-foot">Exibindo {visible.length} de {purchases.length} solicitações <span>Limite de 100 solicitações recentes</span></div></section>
         <footer>Intergado · Gestão rural</footer>
       </div>
     </main>}
 
-    {showForm && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setShowForm(false) }}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="close" onClick={() => setShowForm(false)} aria-label="Fechar">×</button><div className="eyebrow">NOVA ENTRADA</div><h2 id="modal-title">Nova solicitação</h2><p>Registre uma necessidade de compra. Ela entrará como “Recebido”.</p><form onSubmit={create}><label>O que precisa ser comprado?<input name="title" required maxLength="160" placeholder="Ex.: Peças para irrigação"/></label><div className="form-grid"><label>Fazenda<input name="farm" required maxLength="100" placeholder="Ex.: Santa Cruz"/></label><label>Categoria<select name="category" required><option>Insumos</option><option>Manutenção</option><option>Pecuária</option><option>Combustível</option><option>Outros</option></select></label></div><div className="form-grid"><label>Solicitante<input name="requester" required maxLength="100" placeholder="Nome ou equipe"/></label><label>Valor estimado (R$)<input name="amount" type="number" min="0" step="0.01" defaultValue="0" required/></label></div><label>Fornecedor (opcional)<input name="supplier" maxLength="120" placeholder="Ainda não definido"/></label><div className="modal-actions"><button type="button" className="secondary" onClick={() => setShowForm(false)}>Cancelar</button><button type="submit" className="primary" disabled={saving}>{saving ? 'Salvando...' : 'Criar solicitação'}</button></div></form></div></div>}
+    {editing?.kind === 'purchase' && <PurchaseForm purchase={editing.item} farms={farms} onClose={() => setEditing(null)} onSaved={saved} onExpired={onExpired}/>}
+    {editing?.kind === 'farm' && <FarmForm farm={editing.item} onClose={() => setEditing(null)} onSaved={saved} onExpired={onExpired}/>}
   </div>
+}
+
+function Modal({ eyebrow, title, intro, onClose, children }) {
+  useEffect(() => {
+    const onKey = e => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  return <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <button className="close" onClick={onClose} aria-label="Fechar">×</button>
+    <div className="eyebrow">{eyebrow}</div><h2 id="modal-title">{title}</h2><p>{intro}</p>
+    {children}
+  </div></div>
+}
+
+// Shared submit logic: the form fields become the JSON body, and errors stay inside the modal.
+function useSave(onSaved, onExpired) {
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  async function save(request) {
+    setSaving(true); setError('')
+    try { await request(); await onSaved() }
+    catch (e) { e instanceof Unauthorized ? onExpired() : setError(e.message) }
+    finally { setSaving(false) }
+  }
+  return { saving, error, save }
+}
+
+function PurchaseForm({ purchase, farms, onClose, onSaved, onExpired }) {
+  const { saving, error, save } = useSave(onSaved, onExpired)
+  const farmNames = farms.map(f => f.name)
+  // Old records may point to a farm that is not registered (text link); keep it selectable.
+  const farmOptions = purchase && !farmNames.includes(purchase.farm) ? [...farmNames, purchase.farm] : farmNames
+  const categoryOptions = purchase && !categories.includes(purchase.category) ? [...categories, purchase.category] : categories
+  function submit(event) {
+    event.preventDefault()
+    const fields = Object.fromEntries(new FormData(event.currentTarget))
+    fields.amount = Number(fields.amount)
+    fields.supplier = fields.supplier.trim() || null
+    save(() => purchase ? putJson(`/api/purchases/${purchase.id}`, fields) : postJson('/api/purchases', fields))
+  }
+  return <Modal onClose={onClose} eyebrow={purchase ? `SOLICITAÇÃO #${String(purchase.id).padStart(4, '0')}` : 'NOVA ENTRADA'}
+    title={purchase ? 'Editar solicitação' : 'Nova solicitação'}
+    intro={purchase ? `Status atual: ${statusLabels[purchase.status]}. O status muda pela tabela e não é alterado aqui.` : 'Registre uma necessidade de compra. Ela entrará como “Recebido”.'}>
+    <form onSubmit={submit}>
+      <label>O que precisa ser comprado?<input name="title" required maxLength="160" autoFocus defaultValue={purchase?.title} placeholder="Ex.: Peças para irrigação"/></label>
+      <div className="form-grid">
+        <label>Fazenda{farmOptions.length
+          ? <select name="farm" required defaultValue={purchase?.farm ?? ''}>{!purchase && <option value="" disabled>Selecione</option>}{farmOptions.map(name => <option key={name} value={name}>{name}{farmNames.includes(name) ? '' : ' (não cadastrada)'}</option>)}</select>
+          : <input name="farm" required maxLength="100" defaultValue={purchase?.farm} placeholder="Ex.: Santa Cruz"/>}</label>
+        <label>Categoria<select name="category" required defaultValue={purchase?.category ?? categories[0]}>{categoryOptions.map(c => <option key={c}>{c}</option>)}</select></label>
+      </div>
+      <div className="form-grid">
+        <label>Solicitante<input name="requester" required maxLength="100" defaultValue={purchase?.requester} placeholder="Nome ou equipe"/></label>
+        <label>Valor estimado (R$)<input name="amount" type="number" min="0" step="0.01" defaultValue={purchase?.amount ?? 0} required/></label>
+      </div>
+      <label>Fornecedor (opcional)<input name="supplier" maxLength="120" defaultValue={purchase?.supplier ?? ''} placeholder="Ainda não definido"/></label>
+      {error && <div className="error" role="alert">{error}</div>}
+      <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancelar</button><button type="submit" className="primary" disabled={saving}>{saving ? 'Salvando...' : purchase ? 'Salvar alterações' : 'Criar solicitação'}</button></div>
+    </form>
+  </Modal>
+}
+
+function FarmForm({ farm, onClose, onSaved, onExpired }) {
+  const { saving, error, save } = useSave(onSaved, onExpired)
+  const [name, setName] = useState(farm?.name ?? '')
+  const renamed = farm && name.trim() && name.trim() !== farm.name
+  function submit(event) {
+    event.preventDefault()
+    const fields = Object.fromEntries(new FormData(event.currentTarget))
+    fields.herdBalance = Number(fields.herdBalance)
+    fields.adeparaBalance = Number(fields.adeparaBalance)
+    fields.sources = fields.sources.split(',').map(s => s.trim()).filter(Boolean).join(', ')
+    save(() => farm ? putJson(`/api/farms/${farm.id}`, fields) : postJson('/api/farms', fields))
+  }
+  return <Modal onClose={onClose} eyebrow={farm ? 'CADASTRO DE FAZENDAS' : 'NOVA FAZENDA'} title={farm ? `Editar ${farm.name}` : 'Nova fazenda'}
+    intro="Informe o saldo do rebanho na data indicada. Os valores ficam gravados como foram digitados; não há cálculo a partir de movimentos.">
+    <form onSubmit={submit}>
+      <label>Nome<input name="name" required maxLength="100" autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="Ex.: Santa Cruz"/>
+        {renamed && <small className="field-help">As solicitações de compra ligadas a “{farm.name}” passam para o novo nome.</small>}</label>
+      <div className="form-grid">
+        <label>Data do saldo<input name="balanceDate" type="date" required defaultValue={farm?.balanceDate ?? today()}/></label>
+        <label>Saldo do rebanho (cabeças)<input name="herdBalance" type="number" min="0" step="1" required defaultValue={farm?.herdBalance ?? 0}/></label>
+      </div>
+      <div className="form-grid">
+        <label>Saldo Adepará (cabeças)<input name="adeparaBalance" type="number" min="0" step="1" required defaultValue={farm?.adeparaBalance ?? 0}/></label>
+        <label>Fontes (opcional)<input name="sources" maxLength="500" defaultValue={farm?.sources ?? ''} placeholder="Ex.: Controle de gado, Adepará"/>
+          <small className="field-help">Separe por vírgulas.</small></label>
+      </div>
+      {error && <div className="error" role="alert">{error}</div>}
+      <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancelar</button><button type="submit" className="primary" disabled={saving}>{saving ? 'Salvando...' : farm ? 'Salvar alterações' : 'Cadastrar fazenda'}</button></div>
+    </form>
+  </Modal>
 }
 
 const dateTime = value => value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : '—'
