@@ -431,7 +431,7 @@ function Integrations({ onExpired }) {
 }
 
 function IntegrationCard({ integration, onSaved, onExpired }) {
-  const initial = () => Object.fromEntries(integration.fields.map(f => [f.name, ['PHONE_LIST', 'GROUP_LIST'].includes(f.type) ? f.value.split(',').filter(Boolean).join('\n') : f.value]))
+  const initial = () => Object.fromEntries(integration.fields.map(f => [f.name, ['PHONE_LIST', 'GROUP_LIST', 'CHAT_LIST'].includes(f.type) ? f.value.split(',').filter(Boolean).join('\n') : f.value]))
   const [values, setValues] = useState(initial)
   const [status, setStatus] = useState({ busy: false, message: '', error: '' })
   useEffect(() => { setValues(initial()) }, [integration])
@@ -450,6 +450,7 @@ function IntegrationCard({ integration, onSaved, onExpired }) {
     const value = values[field.name] ?? ''
     if (field.type === 'BOOLEAN') return <label className="switch"><input type="checkbox" checked={value === 'true'} onChange={e => set(field.name, String(e.target.checked))}/> {value === 'true' ? 'Ligado' : 'Desligado'}</label>
     if (field.type === 'GROUP_LIST') return <GroupPicker value={value} onChange={v => set(field.name, v)} onExpired={onExpired}/>
+    if (field.type === 'CHAT_LIST') return <TelegramChatPicker value={value} onChange={v => set(field.name, v)} onExpired={onExpired}/>
     if (field.type === 'PHONE_LIST') return <textarea rows="3" value={value} onChange={e => set(field.name, e.target.value)} placeholder="5591999990000"/>
     if (field.type === 'STATUS_LIST') {
       const selected = value.split(',').filter(Boolean)
@@ -472,6 +473,7 @@ function IntegrationCard({ integration, onSaved, onExpired }) {
       <div className="integration-actions">{status.message && <span className="saved">{status.message}</span>}<button type="submit" className="primary" disabled={status.busy}>{status.busy ? 'Salvando...' : 'Salvar'}</button></div>
     </form>
     {integration.key === 'evolution' && <EvolutionConnection onExpired={onExpired}/>}
+    {integration.key === 'telegram' && <TelegramConnection onExpired={onExpired}/>}
   </section>
 }
 
@@ -498,6 +500,64 @@ function GroupPicker({ value, onChange, onExpired }) {
       <input type="checkbox" checked={selected.includes(g.id)} onChange={() => toggle(g.id)}/>
       <span><strong>{g.subject || 'Sem nome'}</strong> <code>{g.id}</code>{g.size ? ` · ${g.size} participantes` : ''}{g.announce ? ' · só administradores enviam' : ''}</span>
     </label>)}</div>}
+  </div>
+}
+
+const chatTypes = { private: 'conversa privada', group: 'grupo', supergroup: 'grupo', channel: 'canal' }
+
+function TelegramChatPicker({ value, onChange, onExpired }) {
+  const [chats, setChats] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const selected = value.split(/[\s,;]+/).filter(Boolean)
+  async function load() {
+    setBusy(true); setError('')
+    try { setChats(await readJson('/api/integrations/telegram/chats')) }
+    catch (e) { e instanceof Unauthorized ? onExpired() : setError(e.message) }
+    finally { setBusy(false) }
+  }
+  const toggle = id => onChange((selected.includes(id) ? selected.filter(s => s !== id) : [...selected, id]).join('\n'))
+  return <div className="groups">
+    <textarea rows="3" value={value} onChange={e => onChange(e.target.value)} placeholder="-1001234567890"/>
+    <div className="groups-actions">
+      <button type="button" className="secondary" disabled={busy} onClick={load}>{busy ? 'Buscando...' : chats ? 'Atualizar conversas' : 'Buscar conversas'}</button>
+      {chats && <small>{chats.length ? `${chats.length} conversa(s) vista(s) pelo bot nas últimas 24 horas. Marque as que recebem mensagens.` : 'Nenhuma conversa recente. Adicione o bot a um grupo ou mande /start a ele e busque de novo.'}</small>}
+    </div>
+    {error && <div className="error" role="alert">{error}</div>}
+    {chats?.length > 0 && <div className="group-options">{chats.map(c => <label key={c.id}>
+      <input type="checkbox" checked={selected.includes(c.id)} onChange={() => toggle(c.id)}/>
+      <span><strong>{c.title || 'Sem nome'}</strong> <code>{c.id}</code> · {chatTypes[c.type] || c.type}</span>
+    </label>)}</div>}
+  </div>
+}
+
+function TelegramConnection({ onExpired }) {
+  const [bot, setBot] = useState(null)
+  const [deliveries, setDeliveries] = useState(null)
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  async function call(action, url, method = 'GET') {
+    setBusy(action); setError('')
+    try {
+      const result = await readJson(url, { method })
+      if (action === 'test') setDeliveries(result)
+      else setBot(result)
+    } catch (e) {
+      if (e instanceof Unauthorized) onExpired()
+      else { if (action === 'bot') setBot(null); setError(e.message) }
+    }
+    finally { setBusy('') }
+  }
+  useEffect(() => { call('bot', '/api/integrations/telegram/bot') }, [])
+  return <div className="evolution">
+    <div className="integration-label"><span>Bot do Telegram</span><span className={`badge ${bot ? 'badge-paid' : 'badge-awaiting_approval'}`}>{bot ? 'Conectado' : 'Sem conexão'}</span></div>
+    {bot && <p><strong>{bot.name}</strong> · <a href={`https://t.me/${bot.username}`} target="_blank" rel="noreferrer">@{bot.username}</a>. Adicione o bot aos grupos que devem receber avisos.</p>}
+    {error && <div className="error" role="alert">{error}</div>}
+    <div className="evolution-actions">
+      <button type="button" className="secondary" disabled={!!busy} onClick={() => call('bot', '/api/integrations/telegram/bot')}>{busy === 'bot' ? 'Verificando...' : 'Verificar bot'}</button>
+      <button type="button" className="primary" disabled={!!busy} onClick={() => call('test', '/api/integrations/telegram/test', 'POST')}>{busy === 'test' ? 'Enviando...' : 'Enviar mensagem de teste'}</button>
+    </div>
+    {deliveries && <ul className="deliveries">{deliveries.map(d => <li key={d.number} className={d.sent ? 'ok' : 'missing'}>{d.number}: {d.sent ? 'enviada' : `falhou (${d.error})`}</li>)}</ul>}
   </div>
 }
 

@@ -30,10 +30,12 @@ import org.springframework.web.server.ResponseStatusException;
 public class PurchaseController {
     private final JdbcTemplate jdbc;
     private final WhatsAppNotifier whatsApp;
+    private final TelegramNotifier telegram;
 
-    public PurchaseController(JdbcTemplate jdbc, WhatsAppNotifier whatsApp) {
+    public PurchaseController(JdbcTemplate jdbc, WhatsAppNotifier whatsApp, TelegramNotifier telegram) {
         this.jdbc = jdbc;
         this.whatsApp = whatsApp;
+        this.telegram = telegram;
     }
 
     public enum Status { RECEIVED, QUOTING, AWAITING_APPROVAL, APPROVED, ORDERED, DELIVERED, PAID }
@@ -89,7 +91,10 @@ public class PurchaseController {
             input.status().name(), id);
         if (changed == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Solicitação não encontrada");
         Purchase purchase = get(id);
-        if (previous != purchase.status()) whatsApp.statusChanged(purchase, previous);
+        if (previous != purchase.status()) {
+            whatsApp.statusChanged(purchase, previous);
+            telegram.statusChanged(purchase, previous);
+        }
         return purchase;
     }
 

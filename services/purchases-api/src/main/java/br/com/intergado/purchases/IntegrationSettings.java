@@ -17,7 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Component
 public class IntegrationSettings {
-    public enum FieldType { BOOLEAN, TEXT, PHONE, PHONE_LIST, GROUP_LIST, STATUS_LIST }
+    public enum FieldType { BOOLEAN, TEXT, PHONE, PHONE_LIST, GROUP_LIST, CHAT_LIST, STATUS_LIST }
 
     public record Field(String name, String label, FieldType type, String envName, String fallback,
                         String pattern, String help) {}
@@ -53,6 +53,18 @@ public class IntegrationSettings {
             List.of(
                 new EnvInfo("URL do Evolution API", "EVOLUTION_API_URL", false, "http://127.0.0.1:8090"),
                 new EnvInfo("Chave global do Evolution API", "EVOLUTION_API_KEY", true, ""))));
+        DEFINITIONS.put("telegram", new Definition("telegram", "Telegram · Bot API",
+            "Envio de mensagens pelo bot do Telegram. As mensagens só vão para as conversas e os grupos cadastrados.",
+            List.of(
+                new Field("enabled", "Enviar avisos automáticos", FieldType.BOOLEAN, "TELEGRAM_ENABLED", "false", null,
+                    "Avisa as conversas e os grupos quando uma solicitação de compra muda de status."),
+                new Field("chats", "Conversas e grupos de destino", FieldType.CHAT_LIST, "TELEGRAM_CHATS", "", null,
+                    "Identificadores (chat_id), um por linha. Grupos começam com -, canais podem usar @nome. Adicione o bot ao grupo (ou mande /start a ele no privado) e use \"Buscar conversas\"."),
+                new Field("notifyStatuses", "Status que geram aviso", FieldType.STATUS_LIST, "TELEGRAM_NOTIFY_STATUSES",
+                    ALL_STATUSES, null, "Avisar quando a solicitação passar para um destes status.")),
+            List.of(
+                new EnvInfo("URL da Bot API", "TELEGRAM_API_URL", false, "https://api.telegram.org"),
+                new EnvInfo("Token do bot (BotFather)", "TELEGRAM_BOT_TOKEN", true, ""))));
         DEFINITIONS.put("resend", new Definition("resend", "E-mail · Resend",
             "Envio do código de acesso por e-mail.",
             List.of(new Field("from", "Remetente", FieldType.TEXT, "AUTH_EMAIL_FROM", "Intergado <onboarding@resend.dev>",
@@ -141,6 +153,8 @@ public class IntegrationSettings {
                 .filter(item -> !item.isEmpty()).map(item -> phone(field, item)).distinct().toList());
             case GROUP_LIST -> String.join(",", Arrays.stream(value.split("[,;\\s]+")).map(String::trim)
                 .filter(item -> !item.isEmpty()).map(item -> group(field, item)).distinct().toList());
+            case CHAT_LIST -> String.join(",", Arrays.stream(value.split("[,;\\s]+")).map(String::trim)
+                .filter(item -> !item.isEmpty()).map(item -> chat(field, item)).distinct().toList());
             case STATUS_LIST -> {
                 List<String> statuses = Arrays.stream(value.split("[,\\s]+")).filter(item -> !item.isBlank()).distinct().toList();
                 for (String status : statuses) {
@@ -159,6 +173,11 @@ public class IntegrationSettings {
 
     private static String group(Field field, String value) {
         if (!value.matches("\\d{5,30}(-\\d{5,20})?@g\\.us")) throw invalid(field, "identificador de grupo inválido: " + value);
+        return value;
+    }
+
+    private static String chat(Field field, String value) {
+        if (!value.matches("-?\\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31}")) throw invalid(field, "chat_id inválido: " + value);
         return value;
     }
 

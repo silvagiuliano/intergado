@@ -31,6 +31,7 @@ O material de contexto inclui o [resumo executivo](01_Resumo_Executivo_Caso_Augu
 | Usuários e perfis | Tela **Usuários** (React, `#usuarios`, só `ADMIN`) e API `/api/users`. Perfis `LEITOR` (consulta), `OPERADOR` (escreve compras e fazendas) e `ADMIN` (também usuários e integrações), verificados pelo `AuthFilter` do Spring Boot a cada requisição (`Role.required`). Administrador inicial por `AUTH_ADMIN_EMAILS`, desativável na tela. |
 | Integrações | Tela **Integrações** (React, `#integracoes`) e API `/api/integrations` para Evolution API (WhatsApp, fase de testes) e Resend. Valores da tela ficam em `integration_settings` e têm prioridade sobre o `.env`; segredos ficam só no `.env`. |
 | WhatsApp | Evolution API 2.3.7 em `compose.evolution.yaml`. Mensagem de teste e aviso automático de mudança de status, **apenas para números de teste e grupos cadastrados** (grupos escolhidos na tela com **Buscar grupos**). Detalhes em [EVOLUTION_API.md](EVOLUTION_API.md). |
+| Telegram | Bot API oficial, chamada direto pelo Spring Boot (sem container). Mesmo aviso de mudança de status e mensagem de teste, só para os `chat_id` cadastrados (escolhidos com **Buscar conversas**). Detalhes em [TELEGRAM.md](TELEGRAM.md). |
 | HTTPS | Mesmo padrão do projeto `jev`: Caddy geral do host (`caddy.service`, um arquivo por projeto em `/etc/caddy/sites/`) na frente do Nginx publicado em `127.0.0.1:WEB_PORT`. Site gerado de `caddy/host/intergado.caddy.template` por `scripts/install-host-caddy.sh` (headers de segurança, HSTS só em domínio real, limite de 2 MB, log em `/var/log/caddy/intergado.log`). Alternativa sem Caddy no host: serviço `caddy` (`caddy:2-alpine`) no profile `standalone`, com `caddy/Caddyfile` (HTTPS) ou `caddy/Caddyfile.local` (HTTP). |
 | Dados das planilhas | Apenas **quatro saldos históricos resumidos** entram no cadastro inicial. As linhas das planilhas não são importadas automaticamente. |
 
@@ -195,6 +196,7 @@ Abra `http://localhost:5173` ou `http://IP_DA_MAQUINA:5173`. Os scripts Java lee
 | `COMPOSE_PROFILES`, `CADDYFILE`, `CADDY_HTTP_PORT`, `CADDY_HTTPS_PORT` | vazio, `./caddy/Caddyfile`, `80`, `443` | Só no modo `standalone` (`COMPOSE_PROFILES=standalone`). |
 | `COMPOSE_FILE` | `compose.yaml` | `compose.yaml:compose.evolution.yaml` inclui o Evolution em todos os comandos e no deploy. |
 | `EVOLUTION_*`, `WHATSAPP_*` | ver [EVOLUTION_API.md](EVOLUTION_API.md#variáveis) | Evolution API e WhatsApp; parte delas também editável na tela Integrações. |
+| `TELEGRAM_*` | ver [TELEGRAM.md](TELEGRAM.md#variáveis) | Bot do Telegram; `TELEGRAM_CHATS`, `TELEGRAM_ENABLED` e `TELEGRAM_NOTIFY_STATUSES` também editáveis na tela. |
 
 ### Docker Compose
 

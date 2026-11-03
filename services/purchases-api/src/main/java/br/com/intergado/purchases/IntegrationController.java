@@ -25,11 +25,16 @@ public class IntegrationController {
     private final IntegrationSettings settings;
     private final EvolutionClient evolution;
     private final WhatsAppNotifier whatsApp;
+    private final TelegramClient telegram;
+    private final TelegramNotifier telegramNotifier;
 
-    public IntegrationController(IntegrationSettings settings, EvolutionClient evolution, WhatsAppNotifier whatsApp) {
+    public IntegrationController(IntegrationSettings settings, EvolutionClient evolution, WhatsAppNotifier whatsApp,
+                                 TelegramClient telegram, TelegramNotifier telegramNotifier) {
         this.settings = settings;
         this.evolution = evolution;
         this.whatsApp = whatsApp;
+        this.telegram = telegram;
+        this.telegramNotifier = telegramNotifier;
     }
 
     @GetMapping
@@ -71,6 +76,32 @@ public class IntegrationController {
             throw new IllegalArgumentException("Cadastre ao menos um número de teste ou grupo antes de enviar.");
         }
         return whatsApp.sendTest((String) request.getAttribute(AuthController.EMAIL_ATTRIBUTE));
+    }
+
+    @GetMapping("/telegram/bot")
+    public TelegramClient.Bot telegramBot() {
+        return telegram.me();
+    }
+
+    @GetMapping("/telegram/chats")
+    public List<TelegramClient.Chat> telegramChats() {
+        return telegram.chats();
+    }
+
+    @PostMapping("/telegram/test")
+    public List<TelegramNotifier.Delivery> telegramTest(HttpServletRequest request) {
+        if (settings.list("telegram", "chats").isEmpty()) {
+            throw new IllegalArgumentException("Cadastre ao menos uma conversa ou grupo antes de enviar.");
+        }
+        if (!telegram.configured()) throw new IllegalStateException("TELEGRAM_BOT_TOKEN não configurado no .env");
+        return telegramNotifier.sendTest((String) request.getAttribute(AuthController.EMAIL_ATTRIBUTE));
+    }
+
+    @ExceptionHandler(TelegramClient.Failure.class)
+    @ResponseStatus(HttpStatus.BAD_GATEWAY)
+    public Map<String, String> telegramUnavailable(TelegramClient.Failure error) {
+        log.warn("Falha na chamada ao Telegram: {}", error.getMessage());
+        return Map.of("error", error.getMessage());
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

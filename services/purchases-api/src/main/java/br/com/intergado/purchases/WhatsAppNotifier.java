@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class WhatsAppNotifier {
     private static final Logger log = LoggerFactory.getLogger(WhatsAppNotifier.class);
-    private static final Map<PurchaseController.Status, String> LABELS = Map.of(
+    static final Map<PurchaseController.Status, String> LABELS = Map.of(
         PurchaseController.Status.RECEIVED, "Recebido",
         PurchaseController.Status.QUOTING, "Em cotação",
         PurchaseController.Status.AWAITING_APPROVAL, "Aguardando aprovação",

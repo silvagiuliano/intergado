@@ -20,6 +20,12 @@ services:
       WHATSAPP_TEST_NUMBERS: ${WHATSAPP_TEST_NUMBERS:-}
       WHATSAPP_GROUPS: ${WHATSAPP_GROUPS:-}
       WHATSAPP_NOTIFY_STATUSES: ${WHATSAPP_NOTIFY_STATUSES:-}
+      # Telegram: Bot API pública, precisa de saída para api.telegram.org
+      TELEGRAM_API_URL: ${TELEGRAM_API_URL:-https://api.telegram.org}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+      TELEGRAM_CHATS: ${TELEGRAM_CHATS:-}
+      TELEGRAM_NOTIFY_STATUSES: ${TELEGRAM_NOTIFY_STATUSES:-}
     volumes:
       - sqlite_data:/data
     healthcheck:

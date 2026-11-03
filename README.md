@@ -26,7 +26,7 @@ O bloco **Fazendas** consulta `GET /api/farms`. A base nova contém Santa Cruz, 
 
 ## Integrações e WhatsApp (testes)
 
-A tela **Integrações**, no menu lateral do painel, mostra e edita os dados dos serviços externos: o WhatsApp pelo [Evolution API](docs/EVOLUTION_API.md) e o remetente do Resend. O valor salvo na tela tem prioridade sobre o `.env`; chaves e senhas ficam só no `.env`.
+A tela **Integrações**, no menu lateral do painel, mostra e edita os dados dos serviços externos: o WhatsApp pelo [Evolution API](docs/EVOLUTION_API.md), o [Telegram](docs/TELEGRAM.md) por bot e o remetente do Resend. O valor salvo na tela tem prioridade sobre o `.env`; chaves e senhas ficam só no `.env`.
 
 O Evolution API roda em um Compose separado, só para testes:
 

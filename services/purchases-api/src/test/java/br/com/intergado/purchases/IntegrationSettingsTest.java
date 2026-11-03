@@ -30,4 +30,19 @@ class IntegrationSettingsTest {
         assertEquals("5591999990000,5591999990001",
             IntegrationSettings.normalize(field("testNumbers"), "+55 (91) 99999-0000\n5591999990001"));
     }
+
+    @Test
+    void telegramChatsAcceptIdsAndChannelNames() {
+        var chats = IntegrationSettings.DEFINITIONS.get("telegram").fields().stream()
+            .filter(field -> field.name().equals("chats")).findFirst().orElseThrow();
+        assertEquals("-1001234567890,123456789,@intergado_avisos",
+            IntegrationSettings.normalize(chats, " -1001234567890\n123456789, @intergado_avisos -1001234567890"));
+        var error = assertThrows(IllegalArgumentException.class, () -> IntegrationSettings.normalize(chats, "grupo-x"));
+        assertEquals("Conversas e grupos de destino: chat_id inválido: grupo-x", error.getMessage());
+    }
+
+    @Test
+    void telegramTextIsHtmlEscaped() {
+        assertEquals("Ra&lt;b&gt;ção &amp; sal", TelegramClient.escape("Ra<b>ção & sal"));
+    }
 }
