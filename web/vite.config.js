@@ -20,6 +20,7 @@ export default defineConfig(({ mode }) => {
         '/api/auth': value('PURCHASES_API_URL', `http://${proxyHost}:${purchasesPort}`),
         '/api/integrations': value('PURCHASES_API_URL', `http://${proxyHost}:${purchasesPort}`),
         '/api/farms': value('PURCHASES_API_URL', `http://${proxyHost}:${purchasesPort}`),
+        '/api/users': value('PURCHASES_API_URL', `http://${proxyHost}:${purchasesPort}`),
         '/api/analytics': value('ANALYTICS_API_URL', `http://${proxyHost}:${analyticsPort}`),
         '/swagger-ui': value('PURCHASES_API_URL', `http://${proxyHost}:${purchasesPort}`),
         '/v3/api-docs': value('PURCHASES_API_URL', `http://${proxyHost}:${purchasesPort}`),
