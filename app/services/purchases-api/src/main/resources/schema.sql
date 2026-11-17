@@ -1,0 +1,71 @@
+PRAGMA journal_mode=WAL;
+
+CREATE TABLE IF NOT EXISTS purchase_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL CHECK (length(title) <= 160),
+  farm TEXT NOT NULL CHECK (length(farm) <= 100),
+  category TEXT NOT NULL CHECK (length(category) <= 80),
+  requester TEXT NOT NULL CHECK (length(requester) <= 100),
+  supplier TEXT CHECK (supplier IS NULL OR length(supplier) <= 120),
+  amount NUMERIC NOT NULL DEFAULT 0 CHECK (amount >= 0),
+  status TEXT NOT NULL CHECK (status IN ('RECEIVED','QUOTING','AWAITING_APPROVAL','APPROVED','ORDERED','DELIVERED','PAID')),
+  requested_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  demo INTEGER NOT NULL DEFAULT 0 CHECK (demo IN (0,1))
+);
+
+CREATE INDEX IF NOT EXISTS idx_purchase_requests_status ON purchase_requests(status);
+CREATE INDEX IF NOT EXISTS idx_purchase_requests_requested_at ON purchase_requests(requested_at DESC);
+
+CREATE TABLE IF NOT EXISTS farms (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE CHECK (length(name) <= 100),
+  balance_date TEXT NOT NULL,
+  herd_balance INTEGER NOT NULL CHECK (herd_balance >= 0),
+  adepara_balance INTEGER NOT NULL CHECK (adepara_balance >= 0),
+  sources TEXT NOT NULL DEFAULT '',
+  demo INTEGER NOT NULL DEFAULT 0 CHECK (demo IN (0,1))
+);
+
+-- Bases antigas recebem as colunas novas em UserService.migrate().
+CREATE TABLE IF NOT EXISTS users (
+  email TEXT PRIMARY KEY CHECK (length(email) <= 254),
+  active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  role TEXT NOT NULL DEFAULT 'LEITOR' CHECK (role IN ('LEITOR','OPERADOR','ADMIN')),
+  name TEXT CHECK (name IS NULL OR length(name) <= 100),
+  created_by TEXT,
+  updated_at TEXT,
+  updated_by TEXT,
+  last_login_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS login_codes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL REFERENCES users(email),
+  code_hash TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  expires_at TEXT NOT NULL,
+  used_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_login_codes_email ON login_codes(email, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  email TEXT NOT NULL REFERENCES users(email),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_email ON sessions(email);
+
+CREATE TABLE IF NOT EXISTS integration_settings (
+  integration TEXT NOT NULL,
+  name TEXT NOT NULL,
+  value TEXT NOT NULL CHECK (length(value) <= 2000),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_by TEXT,
+  PRIMARY KEY (integration, name)
+);

@@ -1,0 +1,94 @@
+services:
+  purchases-api:
+    build: ./services/purchases-api
+    restart: unless-stopped
+    environment:
+      DB_URL: jdbc:sqlite:/data/intergado.db
+      # Administradores iniciais; AUTH_ALLOWED_EMAILS continua aceito como nome antigo
+      AUTH_ADMIN_EMAILS: ${AUTH_ADMIN_EMAILS:-${AUTH_ALLOWED_EMAILS:-}}
+      AUTH_CODE_MINUTES: ${AUTH_CODE_MINUTES:-10}
+      AUTH_SESSION_DAYS: ${AUTH_SESSION_DAYS:-7}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      AUTH_EMAIL_FROM: ${AUTH_EMAIL_FROM:-Intergado <onboarding@resend.dev>}
+      # Evolution API: só responde quando compose.evolution.yaml também está ativo
+      EVOLUTION_API_URL: http://evolution-api:8080
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
+      EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE:-intergado}
+      EVOLUTION_INSTANCE_NUMBER: ${EVOLUTION_INSTANCE_NUMBER:-}
+      WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
+      WHATSAPP_TEST_NUMBERS: ${WHATSAPP_TEST_NUMBERS:-}
+      WHATSAPP_GROUPS: ${WHATSAPP_GROUPS:-}
+      WHATSAPP_NOTIFY_STATUSES: ${WHATSAPP_NOTIFY_STATUSES:-}
+      # Telegram: Bot API pública, precisa de saída para api.telegram.org
+      TELEGRAM_API_URL: ${TELEGRAM_API_URL:-https://api.telegram.org}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+      TELEGRAM_CHATS: ${TELEGRAM_CHATS:-}
+      TELEGRAM_NOTIFY_STATUSES: ${TELEGRAM_NOTIFY_STATUSES:-}
+    volumes:
+      - sqlite_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  analytics-api:
+    build: ./services/analytics-api
+    restart: unless-stopped
+    environment:
+      DB_PATH: /data/intergado.db
+    volumes:
+      - sqlite_data:/data
+    depends_on:
+      purchases-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/q/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  web:
+    build: ./web
+    restart: unless-stopped
+    # Só no loopback, para o Caddy do host encaminhar o site (caddy/host/intergado.caddy.template).
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:80"
+    depends_on:
+      purchases-api:
+        condition: service_healthy
+      analytics-api:
+        condition: service_healthy
+
+  # Caddy próprio do projeto, só no profile standalone (COMPOSE_PROFILES=standalone no .env).
+  # Padrão: Caddy geral do host com o site gerado por scripts/install-host-caddy.sh.
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["standalone"]
+    restart: unless-stopped
+    depends_on:
+      - web
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN:-localhost}
+    ports:
+      - "0.0.0.0:${CADDY_HTTP_PORT:-80}:80"
+      - "0.0.0.0:${CADDY_HTTPS_PORT:-443}:443"
+      - "0.0.0.0:${CADDY_HTTPS_PORT:-443}:443/udp"
+    volumes:
+      # Padrão: HTTPS automático para CADDY_DOMAIN. Use ./caddy/Caddyfile.local para HTTP sem TLS.
+      - ${CADDYFILE:-./caddy/Caddyfile}:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/caddy-health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  sqlite_data:
+  caddy_data:
+  caddy_config:

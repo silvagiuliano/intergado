@@ -1,0 +1,66 @@
+# HTTPS automático: o Caddy emite e renova o certificado do domínio em CADDY_DOMAIN (.env).
+# Requisitos: DNS do domínio apontando para o servidor e portas 80 e 443 abertas na internet.
+# Com CADDY_DOMAIN=localhost, o Caddy usa um certificado interno (o navegador alerta).
+# Para HTTP simples, sem TLS, use CADDYFILE=./caddy/Caddyfile.local no .env.
+
+(security_headers) {
+	header {
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+(web_proxy) {
+	reverse_proxy web:80 {
+		transport http {
+			dial_timeout 5s
+			read_timeout 60s
+		}
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
+
+# Site público. O HTTP da porta 80 é redirecionado para HTTPS automaticamente.
+{$CADDY_DOMAIN} {
+	encode gzip zstd
+	import security_headers
+
+	# HSTS só em domínio real: em localhost o navegador passaria a exigir HTTPS em qualquer porta.
+	@hsts not host localhost 127.0.0.1
+	header @hsts Strict-Transport-Security "max-age=31536000"
+
+	request_body {
+		max_size 2MB
+	}
+
+	handle /caddy-health {
+		header Content-Type application/json
+		respond `{"status":"ok","service":"caddy"}` 200
+	}
+
+	handle {
+		import web_proxy
+	}
+}
+
+# Health interno em HTTP para o healthcheck do Compose e o scripts/deploy-compose.sh,
+# que chamam 127.0.0.1. Só expõe os dois health checks, nunca a aplicação.
+http://127.0.0.1 {
+	handle /caddy-health {
+		header Content-Type application/json
+		respond `{"status":"ok","service":"caddy"}` 200
+	}
+
+	handle /health {
+		import web_proxy
+	}
+
+	handle {
+		respond 404
+	}
+}
